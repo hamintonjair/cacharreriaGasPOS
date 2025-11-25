@@ -1461,22 +1461,17 @@ router.get("/reports/current-stock", auth, async (req, res) => {
     if (!req.user || req.user.role !== "ADMIN")
       return res.status(403).json({ error: "Solo ADMIN" });
 
-    console.log("Iniciando consulta de stock actual...");
 
     // Obtener todos los productos y filtrar en memoria (método confiable)
-    console.log("Obteniendo productos con stock bajo...");
     const allProducts = await prisma.product.findMany({
       orderBy: { nombre: "asc" },
     });
     const products = allProducts.filter((p) => p.stock <= p.stock_minimo);
-    console.log(`Se encontraron ${products.length} productos con stock bajo`);
 
     const gas = await prisma.gasType.findMany({ orderBy: { nombre: "asc" } });
-    console.log(`Se encontraron ${gas.length} tipos de gas`);
 
     res.json({ products, gasTypes: gas });
   } catch (err) {
-    console.error("Error en /reports/current-stock:", err);
     console.error("Stack trace:", err.stack);
     return res.status(500).json({
       error: "Error obteniendo reporte de stock",
