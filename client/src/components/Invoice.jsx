@@ -34,7 +34,8 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
           <div className="flex-1">
             {company.logo_url && (
               <img 
-                src={`${API_URL}${company.logo_url}`} 
+                src={`https://cacharreriagaspos.onrender.com${company.logo_url}`} 
+                  // src={`http://localhost:5000${company.logo_url}`} 
                 alt="Logo" 
                 className="h-16 mb-2"
               />
