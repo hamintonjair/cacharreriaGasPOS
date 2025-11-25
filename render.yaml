@@ -1,5 +1,5 @@
 services:
-  # Backend API Service
+  # Backend API Service - Fixed start command
   - type: web
     name: cacharreriagaspos-api
     env: node
