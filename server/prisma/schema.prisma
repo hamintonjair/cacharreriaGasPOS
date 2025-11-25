@@ -1,0 +1,117 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Modelos para negocio de Gas y Cacharrería
+model User {
+  id        Int      @id @default(autoincrement())
+  nombre    String
+  username  String   @unique
+  password  String
+  role      String   @default("VENDEDOR") // ADMIN, VENDEDOR
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  sales     Sale[]
+
+  @@map("users")
+}
+
+model Category {
+  id       Int       @id @default(autoincrement())
+  nombre   String    @unique
+  products Product[]
+}
+
+model Client {
+  id           Int       @id @default(autoincrement())
+  nombre       String
+  identificacion String?  @unique // Cédula/RUC
+  telefono     String?
+  direccion    String?
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  sales        Sale[]
+
+  @@map("clients")
+}
+
+model Product {
+  id            Int        @id @default(autoincrement())
+  nombre        String
+  codigo_barras String?    @unique
+  precio_venta  Decimal    @db.Decimal(10, 2)
+  costo         Decimal    @db.Decimal(10, 2)
+  stock         Int        @default(0)
+  stock_minimo  Int        @default(5)
+  categoryId    Int
+  category      Category   @relation(fields: [categoryId], references: [id])
+
+  saleItems     SaleItem[]
+}
+
+// MODELO CRÍTICO: Gestión de Gas
+model GasType {
+  id            Int        @id @default(autoincrement())
+  nombre        String     @unique // Ej: "Cilindro 40lb"
+  stock_llenos  Int        @default(0)
+  stock_vacios  Int        @default(0) // Envases vacíos en bodega
+  precio_venta  Decimal    @db.Decimal(10, 2) // Precio del líquido
+  precio_envase Decimal    @db.Decimal(10, 2) // Precio del depósito (casco)
+
+  saleItems     SaleItem[]
+}
+
+model Sale {
+  id          Int        @id @default(autoincrement())
+  fecha       DateTime   @default(now())
+  total       Decimal    @db.Decimal(10, 2)
+  metodo_pago String     // Efectivo, Nequi
+  userId      Int
+  user        User       @relation(fields: [userId], references: [id])
+  clientId    Int?
+  client      Client?    @relation(fields: [clientId], references: [id])
+
+  items       SaleItem[]
+}
+
+model SaleItem {
+  id          Int       @id @default(autoincrement())
+  saleId      Int
+  sale        Sale      @relation(fields: [saleId], references: [id])
+
+  // Relaciones opcionales (Item puede ser Producto O Gas)
+  productId   Int?
+  product     Product?  @relation(fields: [productId], references: [id])
+
+  gasTypeId   Int?
+  gasType     GasType?  @relation(fields: [gasTypeId], references: [id])
+
+  cantidad    Int
+  precio_unit Decimal   @db.Decimal(10, 2)
+  subtotal    Decimal   @db.Decimal(10, 2)
+
+  // Lógica Gas: ¿El cliente entregó envase vacío?
+  recibio_envase Boolean @default(false)
+}
+
+// Modelo de Empresa/Datos de la Compañía
+model Company {
+  id        Int       @id @default(1)
+  name      String
+  tax_id    String    // RUC/NIT
+  address   String
+  phone     String
+  email     String?
+  logo_url  String?   // URL del logo en el servidor
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("companies")
+}
