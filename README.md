@@ -16,7 +16,8 @@ Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrerí
 - 🚨 **Alertas visuales** para cuotas vencidas y por vencer
 - 💬 **Notificaciones WhatsApp** automáticas
 - 🧺 **Gestión de alquileres** de lavadoras con control de tiempo
-
+- 📅 **Sistema de recordatorios** para pagos y devoluciones con notificaciones automáticas
+- 📊 **Análisis de ventas** con gráficos y estadísticas
 
 ## Arquitectura
 
