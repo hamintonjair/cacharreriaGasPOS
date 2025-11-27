@@ -10,7 +10,12 @@ export default function auth(req, res, next) {
     if (!secret) return res.status(500).json({ error: 'JWT_SECRET no configurado' })
 
     const payload = jwt.verify(token, secret)
-    req.user = payload
+    // Asegurar que req.user tenga el campo id desde sub
+    req.user = {
+      id: payload.sub,
+      username: payload.username,
+      role: payload.role
+    }
     next()
   } catch (err) {
     return res.status(401).json({ error: 'Token inválido o expirado' })

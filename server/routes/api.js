@@ -1,4 +1,5 @@
 import { Router } from "express";
+import ExcelJS from "exceljs";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -85,6 +86,7 @@ router.post("/auth/login", async (req, res) => {
   }
 });
 
+
 // PUT /api/gastypes/:id - actualizar tipo de gas (ADMIN)
 router.put("/gastypes/:id", auth, async (req, res) => {
   try {
@@ -148,14 +150,14 @@ router.get("/reports/sales/export", auth, async (req, res) => {
     const end = new Date(`${end_date}T23:59:59.999Z`);
 
     const where = {
-      fecha: { gte: start, lte: end },
+      createdAt: { gte: start, lte: end }, // ✅ CORREGIDO
       ...(metodo_pago ? { metodo_pago: String(metodo_pago) } : {}),
       ...(userId ? { userId: Number(userId) } : {}),
     };
 
     const sales = await prisma.sale.findMany({
       where,
-      orderBy: { fecha: "desc" },
+      orderBy: { createdAt: "desc" }, // ✅ CORREGIDO
       include: {
         user: { select: { id: true, nombre: true, username: true } },
         client: { select: { id: true, nombre: true, identificacion: true } },
@@ -209,10 +211,10 @@ router.get("/reports/sales/export", auth, async (req, res) => {
           : it.gasType?.nombre || "";
         excelData.push([
           s.id, // SALE_ID
-          formatDateColombian(s.fecha), // FECHA (DD/MM/YYYY HH:MM:SS)
+          formatDateColombian(s.createdAt), // FECHA (DD/MM/YYYY HH:MM:SS)
           Number(s.total) || 0, // TOTAL (número para Excel)
-          s.metodo_pago || "", // METODO_PAGO
-          s.user?.nombre || s.user?.username || "", // USUARIO
+          s.paymentMethod || "No especificado", // METODO_PAGO ✅ CORREGIDO
+          s.user?.nombre || s.user?.username || "Sin vendedor", // USUARIO ✅ CORREGIDO
           s.client?.nombre || "SIN CLIENTE", // CLIENTE_NOMBRE
           s.client?.identificacion || "", // CLIENTE_IDENTIFICACION
           nombreItem, // NOMBRE_ITEM
@@ -269,7 +271,124 @@ router.get("/reports/sales/export", auth, async (req, res) => {
     res.status(500).json({ error: "Error exportando CSV de ventas" });
   }
 });
+// GET /api/reports/rentals-history/export - Exportar alquileres a Excel (ADMIN/VENDEDOR)
+router.get("/reports/rentals-history/export", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
 
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      clientId,
+      startDate,
+      endDate,
+    } = req.query;
+
+    // Construir filtros
+    const where = {};
+    if (status) where.status = status;
+    if (clientId) where.clientId = clientId;
+    if (startDate || endDate) {
+      where.rentalDate = {};
+      if (startDate) where.rentalDate.gte = new Date(startDate);
+      if (endDate) where.rentalDate.lte = new Date(endDate + "T23:59:59.999Z");
+    }
+
+    // Obtener alquileres con relaciones
+    const rentals = await prisma.rental.findMany({
+      where,
+      include: {
+        washingMachine: {
+          select: { id: true, description: true, pricePerHour: true },
+        },
+        client: {
+          select: {
+            id: true,
+            nombre: true,
+            identificacion: true,
+            telefono: true,
+          },
+        },
+        user: {
+          select: { id: true, nombre: true, username: true },
+        },
+      },
+      orderBy: { rentalDate: "desc" },
+    });
+
+    // Generar Excel usando la misma lógica que ventas
+
+    const workbook = new ExcelJS.Workbook();
+    const worksheet = workbook.addWorksheet("Historial de Alquileres");
+
+    // Headers
+    worksheet.columns = [
+      { header: "ID Alquiler", key: "id", width: 15 },
+      { header: "Cliente", key: "clientName", width: 25 },
+      { header: "Identificación", key: "clientId", width: 15 },
+      { header: "Lavadora", key: "machineDescription", width: 25 },
+      { header: "Vendedor", key: "userName", width: 20 },
+      { header: "Fecha Alquiler", key: "rentalDate", width: 20 },
+      {
+        header: "Fecha Entrega Programada",
+        key: "scheduledReturnDate",
+        width: 20,
+      },
+      { header: "Horas Alquiladas", key: "hoursRented", width: 15 },
+      { header: "Precio Total", key: "rentalPrice", width: 15 },
+      { header: "Estado", key: "status", width: 15 },
+    ];
+
+    // Data
+    rentals.forEach((rental) => {
+      worksheet.addRow({
+        id: rental.id,
+        clientName: rental.client?.nombre || "N/A",
+        clientId: rental.client?.identificacion || "N/A",
+        machineDescription: rental.washingMachine?.description || "N/A",
+        userName: rental.user?.nombre || "N/A",
+        rentalDate: new Date(rental.rentalDate).toLocaleString("es-EC"),
+        scheduledReturnDate: new Date(
+          rental.scheduledReturnDate
+        ).toLocaleString("es-EC"),
+        hoursRented: rental.hoursRented,
+        rentalPrice: rental.rentalPrice,
+        status: rental.status,
+      });
+    });
+
+    // Style headers
+    worksheet.getRow(1).font = { bold: true };
+    worksheet.getRow(1).fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FFE6B8" },
+    };
+
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=historial-alquileres-${
+        new Date().toISOString().split("T")[0]
+      }.xlsx`
+    );
+
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (error) {
+    console.error("Error exportando alquileres:", error);
+    res.status(500).json({ error: "Error al exportar alquileres" });
+  }
+});
 // GET /api/products - productos de Cacharrería General (protegido)
 router.get("/products", auth, async (req, res) => {
   try {
@@ -479,17 +598,44 @@ router.put("/products/:id", auth, async (req, res) => {
 });
 
 // DELETE /api/products/:id - eliminar producto (protegido)
+// DELETE /api/products/:id - eliminar producto (protegido)
 router.delete("/products/:id", auth, async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ error: "id inválido" });
-    const deleted = await prisma.product.delete({ where: { id } });
-    res.json({ ok: true, id: deleted.id });
+    const productId = Number(req.params.id);
+    if (!productId) return res.status(400).json({ error: "id inválido" });
+
+    // Verificar si hay ventas asociadas
+    const salesCount = await prisma.saleItem.count({
+      where: { productId },
+    });
+
+    if (salesCount > 0) {
+      return res.status(400).json({
+        error: `No se puede eliminar este producto porque está incluido en ${salesCount} venta(s). Una vez vendido, un producto no puede ser eliminado para mantener la integridad de los registros.`,
+      });
+    }
+
+    const deleted = await prisma.product.delete({ where: { id: productId } });
+    res.json({ message: "Producto eliminado correctamente", id: deleted.id });
   } catch (err) {
-    console.error(err);
-    if (err.code === "P2025")
+    console.error("Error en DELETE /products:", err);
+
+    // Manejo específico de foreign key
+    if (err.code === "P2003") {
+      return res.status(400).json({
+        error:
+          "No se puede eliminar este producto porque tiene datos asociados. Verifique que no tenga ventas ni otros registros relacionados.",
+      });
+    }
+
+    if (err.code === "P2025") {
       return res.status(404).json({ error: "Producto no encontrado" });
-    res.status(500).json({ error: "Error eliminando producto" });
+    }
+
+    res.status(500).json({
+      error: "Error eliminando producto",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
   }
 });
 
@@ -607,19 +753,43 @@ router.put("/categories/:id", auth, async (req, res) => {
 });
 
 // DELETE /api/categories/:id - eliminar categoría (ADMIN)
-router.delete("/categories/:id", auth, async (req, res) => {
+router.delete("/categories/:id", async (req, res) => {
   try {
-    if (!req.user || req.user.role !== "ADMIN")
-      return res.status(403).json({ error: "Solo ADMIN" });
-    const id = Number(req.params.id);
-    if (!id) return res.status(400).json({ error: "id inválido" });
-    const deleted = await prisma.category.delete({ where: { id } });
-    return res.json({ ok: true, id: deleted.id });
+    const { id } = req.params;
+    const categoryId = parseInt(id);
+
+    // Verificar si hay productos asociados
+    const productsCount = await prisma.product.count({
+      where: { categoryId },
+    });
+
+    if (productsCount > 0) {
+      return res.status(400).json({
+        error: `No se puede eliminar esta categoría porque está siendo utilizada por ${productsCount} producto(s). Elimine primero los productos asociados o asígnelos a otra categoría.`,
+      });
+    }
+
+    await prisma.category.delete({ where: { id: categoryId } });
+    res.json({ message: "Categoría eliminada correctamente" });
   } catch (err) {
-    console.error(err);
-    if (err.code === "P2025")
+    console.error("Error en DELETE /categories:", err);
+
+    // Manejo específico de foreign key
+    if (err.code === "P2003") {
+      return res.status(400).json({
+        error:
+          "No se puede eliminar esta categoría porque tiene datos asociados. Verifique que no tenga productos ni otros registros relacionados.",
+      });
+    }
+
+    if (err.code === "P2025") {
       return res.status(404).json({ error: "Categoría no encontrada" });
-    return res.status(500).json({ error: "Error eliminando categoría" });
+    }
+
+    res.status(500).json({
+      error: "Error eliminando categoría",
+      details: process.env.NODE_ENV === "development" ? err.message : undefined,
+    });
   }
 });
 
@@ -709,20 +879,31 @@ router.get("/users", async (req, res) => {
 });
 
 // POST /api/sales - registrar venta completa (protegido)
-// body: { userId, clientId?, metodo_pago, items: [ { productId?, gasTypeId?, cantidad, precio_unit, recibio_envase? } ] }
+// body: { userId, clientId, items: [...], payments: [...], creditInstallments?: [...] }
 router.post("/sales", auth, async (req, res) => {
-  const { userId, clientId, metodo_pago, items } = req.body || {};
+  const { userId, clientId, items, payments, creditInstallments } =
+    req.body || {};
+
   if (!userId) return res.status(400).json({ error: "userId es requerido" });
-  if (!metodo_pago)
-    return res.status(400).json({ error: "metodo_pago es requerido" });
   if (!Array.isArray(items) || items.length === 0)
     return res.status(400).json({ error: "items es requerido" });
+  if (!Array.isArray(payments) || payments.length === 0)
+    return res.status(400).json({ error: "payments es requerido" });
 
   try {
     const result = await prisma.$transaction(async (tx) => {
       // Validar usuario
       const user = await tx.user.findUnique({ where: { id: Number(userId) } });
       if (!user) throw { status: 400, message: "Usuario no válido" };
+
+      // Validar cliente si hay pagos o crédito
+      let client = null;
+      if (clientId) {
+        client = await tx.client.findUnique({
+          where: { id: Number(clientId) },
+        });
+        if (!client) throw { status: 400, message: "Cliente no válido" };
+      }
 
       let total = 0;
       const saleItemsToCreate = [];
@@ -736,7 +917,6 @@ router.post("/sales", auth, async (req, res) => {
         if (precioUnit == null)
           throw { status: 400, message: "precio_unit es requerido en item" };
 
-        // Subtotal y acumulado
         const subtotal = Number(precioUnit) * cantidad;
         total += subtotal;
 
@@ -793,28 +973,132 @@ router.post("/sales", auth, async (req, res) => {
           };
         }
       }
-      // Obtener fecha local en formato YYYY-MM-DD HH:mm:ss
-      const now = new Date();
-      
-      const fechaLocal = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
-  .toISOString();
 
+      // ✅ CÁLCULO CORRECTO - Excluir pagos de crédito
+      const cashPayments = payments.filter(
+        (p) => (p.paymentMethod || p.method) !== "CREDIT"
+      );
+      const totalPaidCash = cashPayments.reduce((sum, payment) => {
+        return sum + Number(payment.amount || 0);
+      }, 0);
+
+      // Determinar estado de pago
+      let paymentStatus = "PAID";
+      if (totalPaidCash === 0) {
+        paymentStatus = "PENDING"; // Crédito total
+      } else if (totalPaidCash < total) {
+        paymentStatus = "PARTIAL"; // Pago parcial
+      }
+
+      // 🔥 AGREGAR ESTE CONSOLE.LOG
+      console.log("🔍 ANÁLISIS DE PAGO:", {
+        payments,
+        cashPayments,
+        totalPaidCash,
+        total,
+        paymentStatus,
+        creditInstallments,
+        "¿Hay creditInstallments?":
+          creditInstallments && creditInstallments.length > 0,
+        "¿PaymentStatus es PENDING?": paymentStatus === "PENDING",
+      });
+      // Validar que clientId exista si hay crédito
+      if (
+        (paymentStatus === "PENDING" || paymentStatus === "PARTIAL") &&
+        !clientId
+      ) {
+        throw {
+          status: 400,
+          message: "clientId es requerido para ventas a crédito",
+        };
+      }
+
+      // Validar cuotas si es venta a crédito
+      if (
+        (paymentStatus === "PENDING" || paymentStatus === "PARTIAL") &&
+        creditInstallments &&
+        creditInstallments.length > 0
+      ) {
+        const totalInstallments = creditInstallments.reduce(
+          (sum, installment) => sum + Number(installment.amountDue || 0),
+          0
+        );
+
+        // El total de cuotas debe coincidir con el saldo pendiente
+        const expectedInstallmentTotal = total - totalPaidCash; // ✅ USAR totalPaidCash
+        if (Math.abs(totalInstallments - expectedInstallmentTotal) > 0.01) {
+          throw {
+            status: 400,
+            message: `El total de cuotas ($${totalInstallments}) no coincide con el saldo pendiente ($${expectedInstallmentTotal})`,
+          };
+        }
+      }
+
+      // Obtener fecha local
+      const now = new Date();
+      const fechaLocal = new Date(
+        now.getTime() - now.getTimezoneOffset() * 60000
+      ).toISOString();
+
+      // Crear venta
       const sale = await tx.sale.create({
         data: {
+          total: total,
+          paymentStatus,
+          totalPaid: totalPaidCash,
+          clientId: Number(clientId),
           userId: Number(userId),
-          clientId: clientId ? Number(clientId) : 1, // Default to client 1 (Cliente Genérico)
-          metodo_pago: String(metodo_pago),
-          total: String(total.toFixed(2)),
-        
           items: { create: saleItemsToCreate },
         },
         include: {
           items: true,
           client: { select: { id: true, nombre: true } },
+          payments: true,
         },
       });
 
-      return sale;
+      // Registrar pagos
+      const paymentsToCreate = payments.map((payment) => ({
+        saleId: sale.id,
+        amount: Number(payment.amount),
+        paymentMethod: payment.paymentMethod || "CASH",
+        date: new Date(),
+      }));
+
+      await tx.payment.createMany({
+        data: paymentsToCreate,
+      });
+
+      // Crear cuotas de crédito si aplica
+      if (
+        (paymentStatus === "PENDING" || paymentStatus === "PARTIAL") &&
+        creditInstallments &&
+        creditInstallments.length > 0
+      ) {
+        await tx.creditInstallment.createMany({
+          data: creditInstallments.map((installment, index) => ({
+            saleId: sale.id,
+            installmentNumber: installment.installmentNumber || index + 1,
+            amountDue: String(installment.amountDue),
+            dueDate: new Date(installment.dueDate),
+            status: "PENDING",
+          })),
+        });
+      }
+
+      // 🔥 NUEVO: Devolver la venta con las cuotas incluidas
+      const finalSale = await tx.sale.findUnique({
+        where: { id: sale.id },
+        include: {
+          items: true,
+          client: { select: { id: true, nombre: true } },
+          payments: true,
+          creditInstallments: true, // 🔥 Incluir cuotas
+          user: { select: { id: true, nombre: true, username: true } },
+        },
+      });
+
+      return finalSale;
     });
 
     res.status(201).json(result);
@@ -1247,8 +1531,201 @@ router.delete("/clients/:id", auth, async (req, res) => {
   }
 });
 
-export default router;
+// GET /api/sales/pending-payments - Listar cuentas por cobrar con cuotas (protegido)
+router.get("/sales/pending-payments", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      console.log("❌ Acceso denegado - Rol inválido");
+      return res.status(403).json({ error: "Acceso denegado" });
+    }
 
+    const { page = 1, limit = 50, clientId, startDate, endDate } = req.query;
+    const pageNumber = Number(page);
+    const limitNumber = Number(limit);
+    const offset = (pageNumber - 1) * limitNumber;
+
+    // Construir filtros para ventas con cuotas pendientes
+    const where = {
+      creditInstallments: {
+        some: {
+          status: {
+            in: ["PENDING", "OVERDUE"],
+          },
+        },
+      },
+    };
+
+    if (clientId) {
+      where.clientId = Number(clientId);
+    }
+
+    if (startDate || endDate) {
+      where.createdAt = {};
+      if (startDate) {
+        where.createdAt.gte = new Date(startDate);
+      }
+      if (endDate) {
+        where.createdAt.lte = new Date(endDate + "T23:59:59.999Z");
+      }
+    }
+
+    // Obtener ventas con cuotas pendientes
+    const [sales, total] = await Promise.all([
+      prisma.sale.findMany({
+        where,
+        include: {
+          client: {
+            select: {
+              id: true,
+              nombre: true,
+              identificacion: true,
+              telefono: true,
+            },
+          },
+          user: {
+            select: { id: true, nombre: true, username: true },
+          },
+          creditInstallments: {
+            where: {
+              status: {
+                in: ["PENDING", "OVERDUE"],
+              },
+            },
+            orderBy: {
+              dueDate: "asc",
+            },
+          },
+          payments: {
+            orderBy: { date: "desc" },
+            take: 3,
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: offset,
+        take: limitNumber,
+      }),
+      prisma.sale.count({ where }),
+    ]);
+
+    // Formatear respuesta con detalles de cuotas
+     const salesWithInstallments = sales.map((sale) => {
+      const pendingInstallments = sale.creditInstallments.filter(
+        (installment) => installment.status === "PENDING"
+      );
+      const overdueInstallments = sale.creditInstallments.filter(
+        (installment) => installment.status === "OVERDUE"
+      );
+
+      const totalPending = pendingInstallments.reduce(
+        (sum, installment) => sum + Number(installment.amountDue),
+        0
+      );
+      const totalOverdue = overdueInstallments.reduce(
+        (sum, installment) => sum + Number(installment.amountDue),
+        0
+      );
+      const totalDebt = totalPending + totalOverdue;
+
+      return {
+        id: sale.id,
+        createdAt: sale.createdAt,
+        client: sale.client,
+        user: sale.user,
+        total: Number(sale.total),
+        totalPaid: sale.payments 
+        ? sale.payments
+            .filter(payment => payment.paymentMethod !== "CREDIT")
+            .reduce((sum, payment) => sum + Number(payment.amount), 0)
+        : 0,
+   
+
+        // Información de cuotas
+        creditInstallments: sale.creditInstallments.map((installment) => ({
+          id: installment.id,
+          installmentNumber: installment.installmentNumber,
+          amountDue: Number(installment.amountDue),
+          dueDate: installment.dueDate,
+          status: installment.status,
+          paidAt: installment.paidAt,
+        })),
+
+        // Resúmenes
+        totalInstallments: sale.creditInstallments.length,
+        pendingInstallments: pendingInstallments.length,
+        overdueInstallments: overdueInstallments.length,
+
+        // Totales financieros
+        totalPendingDebt: totalPending,
+        totalOverdueDebt: totalOverdue,
+        totalDebt: totalDebt,
+
+        // Pagamentos previos
+        paymentsCount: sale.payments?.length || 0,
+        lastPayments: sale.payments || [],
+      };
+    });
+
+    // Calcular estadísticas generales
+    const stats = {
+      totalSales: sales.length,
+      totalDebt: salesWithInstallments.reduce(
+        (sum, sale) => sum + sale.totalDebt,
+        0
+      ),
+      totalPendingDebt: salesWithInstallments.reduce(
+        (sum, sale) => sum + sale.totalPendingDebt,
+        0
+      ),
+      totalOverdueDebt: salesWithInstallments.reduce(
+        (sum, sale) => sum + sale.totalOverdueDebt,
+        0
+      ),
+      pendingInstallments: salesWithInstallments.reduce(
+        (sum, sale) => sum + sale.pendingInstallments,
+        0
+      ),
+      overdueInstallments: salesWithInstallments.reduce(
+        (sum, sale) => sum + sale.overdueInstallments,
+        0
+      ),
+    };
+
+    console.log("📊 Estadísticas calculadas:", stats);
+
+    const totalPages = Math.ceil(total / limitNumber);
+
+    const response = {
+      data: salesWithInstallments,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limitNumber,
+        hasNextPage: pageNumber < totalPages,
+        hasPreviousPage: pageNumber > 1,
+      },
+      stats,
+    };
+
+    console.log("✅ Enviando respuesta exitosa");
+    res.json(response);
+  } catch (error) {
+    // Error específico de Prisma
+    if (error.code) {
+      console.error("❌ Código de error Prisma:", error.code);
+      console.error("❌ Meta de error Prisma:", error.meta);
+    }
+
+    res.status(500).json({
+      error: "Error obteniendo cuentas por cobrar",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
 // ===================== VENTAS INDIVIDUALES =====================
 router.get("/sales/:id", auth, async (req, res) => {
   try {
@@ -1305,6 +1782,7 @@ router.get("/sales/:id", auth, async (req, res) => {
   }
 });
 
+
 // ===================== REPORTES (ADMIN) =====================
 router.get("/reports/sales", auth, async (req, res) => {
   try {
@@ -1321,8 +1799,8 @@ router.get("/reports/sales", auth, async (req, res) => {
       });
     }
 
-  const start = new Date(`${start_date}T00:00:00.000`)
-const end = new Date(`${end_date}T23:59:59.999`)
+    const start = new Date(`${start_date}T00:00:00.000`);
+    const end = new Date(`${end_date}T23:59:59.999`);
 
     // Validar que las fechas sean válidas
     if (isNaN(start.getTime()) || isNaN(end.getTime())) {
@@ -1338,9 +1816,9 @@ const end = new Date(`${end_date}T23:59:59.999`)
       });
     }
 
-    // Construir objeto de filtro
+    // Construir objeto de filtro - CORREGIDO
     const where = {
-      fecha: { gte: start, lte: end },
+      createdAt: { gte: start, lte: end }, // ← Cambiado de 'fecha' a 'createdAt'
       ...(metodo_pago
         ? { metodo_pago: { equals: String(metodo_pago), mode: "insensitive" } }
         : {}),
@@ -1348,10 +1826,10 @@ const end = new Date(`${end_date}T23:59:59.999`)
       ...(userId ? { userId: Number(userId) } : {}),
     };
 
-    // Obtener ventas con sus relaciones
+    // Obtener ventas con sus relaciones - CORREGIDO
     const sales = await prisma.sale.findMany({
       where,
-      orderBy: { fecha: "desc" },
+      orderBy: { createdAt: "desc" }, // ← Cambiado de 'fecha' a 'createdAt'
       include: {
         user: {
           select: {
@@ -1391,11 +1869,12 @@ const end = new Date(`${end_date}T23:59:59.999`)
       },
     });
 
-    // Formatear la respuesta para el frontend
+    // Formatear la respuesta para el frontend - CORREGIDO
     const formattedSales = sales.map((sale) => ({
       id: sale.id,
-      fecha: sale.fecha.toISOString(),
-      fechaFormatted: new Date(sale.fecha).toLocaleDateString("es-ES", {
+      fecha: sale.createdAt.toISOString(), // ← Cambiado de 'fecha' a 'createdAt'
+      fechaFormatted: new Date(sale.createdAt).toLocaleDateString("es-ES", {
+        // ← Cambiado
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
@@ -1461,7 +1940,6 @@ router.get("/reports/current-stock", auth, async (req, res) => {
     if (!req.user || req.user.role !== "ADMIN")
       return res.status(403).json({ error: "Solo ADMIN" });
 
-
     // Obtener todos los productos y filtrar en memoria (método confiable)
     const allProducts = await prisma.product.findMany({
       orderBy: { nombre: "asc" },
@@ -1482,133 +1960,130 @@ router.get("/reports/current-stock", auth, async (req, res) => {
 
 // ======= SUMMARY (ADMIN) =======
 async function computeSummaryForDateRange(startDate, endDate) {
-  const start = new Date(`${startDate}T00:00:00.000Z`);
-  const end = new Date(`${endDate}T23:59:59.999Z`);
+  try {
+    const start = new Date(`${startDate}T00:00:00.000`);
+    const end = new Date(`${endDate}T23:59:59.999`);
 
-  const sales = await prisma.sale.findMany({
-    where: {
-      fecha: {
-        gte: start,
-        lte: end,
+    const sales = await prisma.sale.findMany({
+      where: {
+        createdAt: { gte: start, lte: end }, // ← Cambiado de 'fecha' a 'createdAt'
       },
-    },
-    include: {
-      user: { select: { id: true, nombre: true, username: true } },
-      client: { select: { id: true, nombre: true } },
-      items: {
-        include: {
-          gasType: { select: { id: true, nombre: true } },
-          product: { select: { id: true, nombre: true } },
+      include: {
+        user: {
+          select: { id: true, nombre: true, username: true },
+        },
+        client: {
+          select: { id: true, nombre: true },
+        },
+        items: {
+          include: {
+            gasType: {
+              select: { id: true, nombre: true },
+            },
+            product: {
+              select: { id: true, nombre: true },
+            },
+          },
         },
       },
-    },
-    orderBy: { fecha: "asc" },
-  });
+      orderBy: { createdAt: "asc" }, // ← Cambiado de 'fecha' a 'createdAt'
+    });
 
-  // Ventas Totales
-  const totalSales = sales.reduce((acc, s) => acc + Number(s.total || 0), 0);
+    // Calcular totales generales
+    const totalSales = sales.reduce(
+      (sum, sale) => sum + Number(sale.total || 0),
+      0
+    );
+    const totalItems = sales.reduce(
+      (sum, sale) => sum + (sale.items?.length || 0),
+      0
+    );
+    const averageSale = sales.length > 0 ? totalSales / sales.length : 0;
+    const totalCustomers = new Set(sales.map((sale) => sale.clientId)).size;
 
-  // Productos Vendidos (suma de todas las cantidades)
-  let totalItems = 0;
-  for (const s of sales) {
-    for (const it of s.items || []) {
-      totalItems += Number(it.cantidad || 0);
-    }
-  }
+    // Agrupar por método de pago
+    const totalesPorMetodo = sales.reduce((acc, sale) => {
+      const metodo = sale.metodo_pago || "No especificado";
+      acc[metodo] = (acc[metodo] || 0) + Number(sale.total || 0);
+      return acc;
+    }, {});
 
-  // Venta Promedio
-  const averageSale = sales.length > 0 ? totalSales / sales.length : 0;
-
-  // Clientes Atendidos (conteo de clientes únicos)
-  const uniqueClients = new Set();
-  for (const s of sales) {
-    if (s.clientId) {
-      uniqueClients.add(s.clientId);
-    }
-  }
-  const totalCustomers = uniqueClients.size;
-
-  const totalesPorMetodo = {};
-  for (const s of sales) {
-    const m = s.metodo_pago || "Otros";
-    totalesPorMetodo[m] = (totalesPorMetodo[m] || 0) + Number(s.total || 0);
-  }
-
-  let totalEnvasesRecibidos = 0;
-  let totalVentasCacharreria = 0;
-  let totalVentasGas = 0;
-
-  for (const s of sales) {
-    for (const it of s.items || []) {
-      if (it.gasType && it.recibio_envase) {
-        totalEnvasesRecibidos += Number(it.cantidad || 0);
+    // Agrupar ventas por día
+    const ventasPorDia = sales.reduce((acc, sale) => {
+      const dia = new Date(sale.createdAt).toISOString().split("T")[0]; // ← Cambiado de 'fecha' a 'createdAt'
+      if (!acc[dia]) {
+        acc[dia] = { count: 0, total: 0 };
       }
-      // Acumulados por tipo de ítem
-      const sub = Number(it.subtotal || 0);
-      if (it.product) totalVentasCacharreria += sub;
-      if (it.gasType) totalVentasGas += sub;
-    }
-  }
+      acc[dia].count++;
+      acc[dia].total += Number(sale.total || 0);
+      return acc;
+    }, {});
 
-  const porVendedorMap = new Map();
-  for (const s of sales) {
-    const key = s.userId;
-    const entry = porVendedorMap.get(key) || {
-      userId: s.userId,
-      username: s.user?.username || "",
-      nombre: s.user?.nombre || "",
-      totalVentas: 0,
-      montoTotal: 0,
+    // Agrupar por vendedor
+    const ventasPorVendedor = sales.reduce((acc, sale) => {
+      const vendedor = sale.user?.nombre || "Desconocido";
+      if (!acc[vendedor]) {
+        acc[vendedor] = { count: 0, total: 0 };
+      }
+      acc[vendedor].count++;
+      acc[vendedor].total += Number(sale.total || 0);
+      return acc;
+    }, {});
+
+    // Separar ventas por tipo
+    const ventasPorTipo = sales.reduce(
+      (acc, sale) => {
+        const ventasGas = sale.items?.filter((item) => item.gasType) || [];
+        const ventasProductos =
+          sale.items?.filter((item) => item.product) || [];
+
+        acc.totalVentasGas += ventasGas.reduce(
+          (sum, item) => sum + Number(item.subtotal || 0),
+          0
+        );
+        acc.totalVentasCacharreria += ventasProductos.reduce(
+          (sum, item) => sum + Number(item.subtotal || 0),
+          0
+        );
+        acc.totalEnvasesRecibidos += ventasGas
+          .filter((item) => item.recibio_envase)
+          .reduce((sum, item) => sum + Number(item.cantidad || 0), 0);
+
+        return acc;
+      },
+      { totalVentasGas: 0, totalVentasCacharreria: 0, totalEnvasesRecibidos: 0 }
+    );
+
+    // Formatear ventas por día para el frontend
+    const dailySales = Object.entries(ventasPorDia).map(([date, data]) => ({
+      date,
+      sales: data.count,
+      total: data.total,
+    }));
+
+    return {
+      totalSales,
+      totalItems,
+      averageSale,
+      totalCustomers,
+      // Nuevos campos para gráficos (formato esperado por frontend)
+      paymentMethods: totalesPorMetodo,
+      dailySales,
+      // Mantener compatibilidad con otros campos existentes
+      totalBruto: totalSales, // Para compatibilidad, apunta al mismo valor
+      totalesPorMetodo,
+      totalEnvasesRecibidos: ventasPorTipo.totalEnvasesRecibidos,
+      totalVentasCacharreria: ventasPorTipo.totalVentasCacharreria,
+      totalVentasGas: ventasPorTipo.totalVentasGas,
+      ventasPorVendedor,
+      ventasPorDia,
+      cantidadVentas: sales.length,
     };
-    entry.totalVentas += 1;
-    entry.montoTotal += Number(s.total || 0);
-    porVendedorMap.set(key, entry);
+  } catch (error) {
+    console.error("Error en computeSummaryForDateRange:", error);
+    throw error;
   }
-
-  const ventasPorVendedor = Array.from(porVendedorMap.values()).sort(
-    (a, b) => a.userId - b.userId
-  );
-
-  // Agrupar ventas por día para el gráfico
-  const ventasPorDia = {};
-  const currentDate = new Date(start);
-  while (currentDate <= end) {
-    const dateStr = currentDate.toISOString().split("T")[0];
-    ventasPorDia[dateStr] = 0;
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-
-  for (const sale of sales) {
-    const saleDate = new Date(sale.fecha).toISOString().split("T")[0];
-    if (ventasPorDia.hasOwnProperty(saleDate)) {
-      ventasPorDia[saleDate] += Number(sale.total || 0);
-    } else {
-      ventasPorDia[saleDate] = Number(sale.total || 0);
-    }
-  }
-
-  return {
-    startDate: startDate,
-    endDate: endDate,
-    totalSales,
-    totalItems,
-    averageSale,
-    totalCustomers,
-    // Nuevos campos para gráficos (formato esperado por frontend)
-    paymentMethods: totalesPorMetodo,
-    dailySales: ventasPorDia,
-    // Mantener compatibilidad con otros campos existentes
-    totalBruto: totalSales, // Para compatibilidad, apunta al mismo valor
-    totalesPorMetodo,
-    totalEnvasesRecibidos,
-    totalVentasCacharreria,
-    totalVentasGas,
-    ventasPorVendedor,
-    ventasPorDia,
-    cantidadVentas: sales.length,
-  };
 }
-
 router.get("/reports/summary", auth, async (req, res) => {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
@@ -1638,11 +2113,9 @@ router.get("/reports/summary", auth, async (req, res) => {
       }
 
       if (start > end) {
-        return res
-          .status(400)
-          .json({
-            error: "La fecha de inicio debe ser anterior a la fecha de fin",
-          });
+        return res.status(400).json({
+          error: "La fecha de inicio debe ser anterior a la fecha de fin",
+        });
       }
 
       const summary = await computeSummaryForDateRange(
@@ -1729,11 +2202,9 @@ router.put("/company", auth, async (req, res) => {
 
     // Validaciones básicas
     if (!name || !tax_id || !address || !phone) {
-      return res
-        .status(400)
-        .json({
-          error: "Nombre, RUC/NIT, dirección y teléfono son requeridos",
-        });
+      return res.status(400).json({
+        error: "Nombre, RUC/NIT, dirección y teléfono son requeridos",
+      });
     }
 
     // Obtener o crear la empresa
@@ -1820,3 +2291,1012 @@ router.post("/company/logo", auth, upload.single("logo"), async (req, res) => {
     res.status(500).json({ error: "Error subiendo logo" });
   }
 });
+
+// ===================== LAVADORAS (WASHING MACHINES) =====================
+
+// GET /api/washing-machines - Listar lavadoras (ADMIN)
+router.get("/washing-machines", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const { page = 1, limit = 10, search = "" } = req.query;
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // Construir filtro de búsqueda
+    const where = {};
+    if (search) {
+      where.OR = [{ description: { contains: search, mode: "insensitive" } }];
+    }
+
+    // Obtener lavadoras con paginación
+    const [machines, total] = await Promise.all([
+      prisma.washingMachine.findMany({
+        where,
+        select: {
+          id: true,
+          description: true,
+          pricePerHour: true,
+          initialQuantity: true,
+          availableQuantity: true,
+          createdAt: true,
+          updatedAt: true,
+          _count: {
+            select: { rentals: true },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limitNumber,
+      }),
+      prisma.washingMachine.count({ where }),
+    ]);
+
+    res.json({
+      data: machines,
+      pagination: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    });
+  } catch (error) {
+    console.error("Error al obtener lavadoras:", error);
+    res.status(500).json({ error: "Error al obtener las lavadoras" });
+  }
+});
+
+// POST /api/washing-machines - Crear lavadora (ADMIN)
+router.post("/washing-machines", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const { description, pricePerHour, initialQuantity = 1 } = req.body;
+
+    // Validaciones
+    if (!description) {
+      return res.status(400).json({ error: "La descripción es requerida" });
+    }
+    if (pricePerHour == null || pricePerHour <= 0) {
+      return res
+        .status(400)
+        .json({ error: "El precio por hora debe ser mayor a 0" });
+    }
+    if (initialQuantity <= 0) {
+      return res
+        .status(400)
+        .json({ error: "La cantidad inicial debe ser mayor a 0" });
+    }
+
+    // Verificar si ya existe una lavadora con esa descripción
+    const existingMachine = await prisma.washingMachine.findFirst({
+      where: { description: { equals: description, mode: "insensitive" } },
+    });
+    if (existingMachine) {
+      return res
+        .status(400)
+        .json({ error: "Ya existe una lavadora con esa descripción" });
+    }
+
+    // Crear lavadora
+    const machine = await prisma.washingMachine.create({
+      data: {
+        description: description.trim(),
+        pricePerHour: String(pricePerHour),
+        initialQuantity: Number(initialQuantity),
+        availableQuantity: Number(initialQuantity),
+      },
+      select: {
+        id: true,
+        description: true,
+        pricePerHour: true,
+        initialQuantity: true,
+        availableQuantity: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    res.status(201).json(machine);
+  } catch (error) {
+    console.error("Error al crear lavadora:", error);
+    res.status(500).json({ error: "Error al crear la lavadora" });
+  }
+});
+
+// PUT /api/washing-machines/:id - Actualizar lavadora (ADMIN)
+router.put("/washing-machines/:id", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const machineId = parseInt(req.params.id);
+    const { description, pricePerHour, initialQuantity } = req.body;
+
+    // Validaciones
+    if (!machineId || isNaN(machineId)) {
+      return res.status(400).json({ error: "ID de lavadora inválido" });
+    }
+    if (!description) {
+      return res.status(400).json({ error: "La descripción es requerida" });
+    }
+    if (pricePerHour != null && pricePerHour <= 0) {
+      return res
+        .status(400)
+        .json({ error: "El precio por hora debe ser mayor a 0" });
+    }
+    if (initialQuantity != null && initialQuantity <= 0) {
+      return res
+        .status(400)
+        .json({ error: "La cantidad inicial debe ser mayor a 0" });
+    }
+
+    // Verificar si la lavadora existe
+    const existingMachine = await prisma.washingMachine.findUnique({
+      where: { id: machineId },
+    });
+    if (!existingMachine) {
+      return res.status(404).json({ error: "Lavadora no encontrada" });
+    }
+
+    // Verificar si la nueva descripción ya existe en otra lavadora
+    if (description !== existingMachine.description) {
+      const duplicateMachine = await prisma.washingMachine.findFirst({
+        where: {
+          description: { equals: description, mode: "insensitive" },
+          NOT: { id: machineId },
+        },
+      });
+      if (duplicateMachine) {
+        return res
+          .status(400)
+          .json({ error: "Ya existe otra lavadora con esa descripción" });
+      }
+    }
+
+    // Calcular nueva cantidad disponible si cambia la inicial
+    let availableQuantity = existingMachine.availableQuantity;
+    if (
+      initialQuantity != null &&
+      initialQuantity !== existingMachine.initialQuantity
+    ) {
+      const difference = initialQuantity - existingMachine.initialQuantity;
+      availableQuantity = Math.max(
+        0,
+        existingMachine.availableQuantity + difference
+      );
+    }
+
+    // Actualizar lavadora
+    const updatedMachine = await prisma.washingMachine.update({
+      where: { id: machineId },
+      data: {
+        description: description.trim(),
+        ...(pricePerHour != null ? { pricePerHour: String(pricePerHour) } : {}),
+        ...(initialQuantity != null
+          ? { initialQuantity: Number(initialQuantity) }
+          : {}),
+        availableQuantity,
+      },
+      select: {
+        id: true,
+        description: true,
+        pricePerHour: true,
+        initialQuantity: true,
+        availableQuantity: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    res.json(updatedMachine);
+  } catch (error) {
+    console.error("Error al actualizar lavadora:", error);
+    res.status(500).json({ error: "Error al actualizar la lavadora" });
+  }
+});
+
+// DELETE /api/washing-machines/:id - Eliminar lavadora (ADMIN)
+router.delete("/washing-machines/:id", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const machineId = parseInt(req.params.id);
+    if (!machineId || isNaN(machineId)) {
+      return res.status(400).json({ error: "ID de lavadora inválido" });
+    }
+
+    // Verificar si la lavadora existe
+    const machine = await prisma.washingMachine.findUnique({
+      where: { id: machineId },
+      include: { _count: { select: { rentals: true } } },
+    });
+    if (!machine) {
+      return res.status(404).json({ error: "Lavadora no encontrada" });
+    }
+
+    // No permitir eliminar si tiene alquileres activos
+    if (machine.availableQuantity < machine.initialQuantity) {
+      return res.status(400).json({
+        error:
+          "No se puede eliminar la lavadora porque tiene alquileres activos",
+      });
+    }
+
+    // Eliminar lavadora
+    await prisma.washingMachine.delete({ where: { id: machineId } });
+
+    res.json({ message: "Lavadora eliminada correctamente" });
+  } catch (error) {
+    console.error("Error al eliminar lavadora:", error);
+    res.status(500).json({ error: "Error al eliminar la lavadora" });
+  }
+});
+
+// ===================== ALQUILERES (RENTALS) =====================
+
+// GET /api/rentals - Listar alquileres (ADMIN)
+router.get("/rentals", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const { page = 1, limit = 10, status, clientId } = req.query;
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // Construir filtro
+    const where = {};
+    if (status) {
+      where.status = status;
+    }
+    if (clientId) {
+      where.clientId = Number(clientId);
+    }
+
+    // Obtener alquileres con relaciones
+    const [rentals, total] = await Promise.all([
+      prisma.rental.findMany({
+        where,
+        include: {
+          washingMachine: {
+            select: { id: true, description: true, pricePerHour: true },
+          },
+          client: {
+            select: {
+              id: true,
+              nombre: true,
+              identificacion: true,
+              telefono: true,
+            },
+          },
+          user: {
+            select: { id: true, nombre: true, username: true },
+          },
+        },
+        orderBy: { rentalDate: "desc" },
+        skip,
+        take: limitNumber,
+      }),
+      prisma.rental.count({ where }),
+    ]);
+
+    res.json({
+      data: rentals,
+      pagination: {
+        total,
+        page: pageNumber,
+        limit: limitNumber,
+        totalPages: Math.ceil(total / limitNumber),
+      },
+    });
+  } catch (error) {
+    console.error("Error al obtener alquileres:", error);
+    res.status(500).json({ error: "Error al obtener los alquileres" });
+  }
+});
+
+// POST /api/rentals - Crear alquiler (ADMIN/VENDEDOR)
+router.post("/rentals", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      return res.status(403).json({ error: "Solo ADMIN o VENDEDOR" });
+    }
+
+    const {
+      washingMachineId,
+      clientId,
+      hoursRented = 1,
+      scheduledReturnDate,
+      notes,
+    } = req.body;
+
+    // Validaciones
+    if (!washingMachineId || !clientId || !scheduledReturnDate) {
+      return res.status(400).json({
+        error:
+          "washingMachineId, clientId y scheduledReturnDate son requeridos",
+      });
+    }
+
+    if (hoursRented <= 0) {
+      return res
+        .status(400)
+        .json({ error: "Las horas alquiladas deben ser mayor a 0" });
+    }
+
+    // Verificar que la lavadora existe y está disponible
+    const machine = await prisma.washingMachine.findUnique({
+      where: { id: Number(washingMachineId) },
+    });
+    if (!machine) {
+      return res.status(404).json({ error: "Lavadora no encontrada" });
+    }
+    if (machine.availableQuantity <= 0) {
+      return res
+        .status(400)
+        .json({ error: "No hay lavadoras disponibles de este modelo" });
+    }
+
+    // Verificar que el cliente existe
+    const client = await prisma.client.findUnique({
+      where: { id: Number(clientId) },
+    });
+    if (!client) {
+      return res.status(404).json({ error: "Cliente no encontrado" });
+    }
+
+    // Validar fecha de devolución programada
+    const returnDate = new Date(scheduledReturnDate);
+    const now = new Date();
+    if (returnDate <= now) {
+      return res
+        .status(400)
+        .json({ error: "La fecha de devolución debe ser futura" });
+    }
+
+    // Calcular precio total
+    const rentalPrice = Number(machine.pricePerHour) * hoursRented;
+
+    // Crear alquiler en transacción
+    const result = await prisma.$transaction(async (tx) => {
+      // Reducir cantidad disponible
+      await tx.washingMachine.update({
+        where: { id: Number(washingMachineId) },
+        data: { availableQuantity: { decrement: 1 } },
+      });
+
+      // Crear alquiler
+      const rental = await tx.rental.create({
+        data: {
+          washingMachineId: Number(washingMachineId),
+          clientId: Number(clientId),
+          rentalPrice: String(rentalPrice),
+          rentalDate: new Date(),
+          scheduledReturnDate: returnDate,
+          status: "RENTED",
+          userId: req.user.id,
+          hoursRented: Number(hoursRented),
+          notes: notes?.trim() || null,
+        },
+      });
+
+      // Obtener alquiler con relaciones para la respuesta
+      const rentalWithRelations = await tx.rental.findUnique({
+        where: { id: rental.id },
+        include: {
+          washingMachine: {
+            select: { id: true, description: true, pricePerHour: true },
+          },
+          client: {
+            select: {
+              id: true,
+              nombre: true,
+              identificacion: true,
+              telefono: true,
+            },
+          },
+          user: {
+            select: { id: true, nombre: true, username: true },
+          },
+        },
+      });
+
+      return rentalWithRelations;
+    });
+
+    res.status(201).json(result);
+  } catch (error) {
+    console.error("Error al crear alquiler:", error);
+    res.status(500).json({ error: "Error al crear el alquiler" });
+  }
+});
+
+// PUT /api/rentals/:id/deliver - Marcar como entregado (ADMIN/VENDEDOR)
+router.put("/rentals/:id/deliver", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      return res.status(403).json({ error: "Solo ADMIN o VENDEDOR" });
+    }
+
+    const rentalId = parseInt(req.params.id);
+    if (!rentalId || isNaN(rentalId)) {
+      return res.status(400).json({ error: "ID de alquiler inválido" });
+    }
+
+    // Verificar que el alquiler existe y está en estado RENTED
+    const rental = await prisma.rental.findUnique({
+      where: { id: rentalId },
+      include: {
+        washingMachine: { select: { id: true, description: true } },
+      },
+    });
+    if (!rental) {
+      return res.status(404).json({ error: "Alquiler no encontrado" });
+    }
+    if (rental.status !== "RENTED") {
+      return res
+        .status(400)
+        .json({ error: "El alquiler ya fue entregado o cancelado" });
+    }
+
+    // Actualizar en transacción
+    const result = await prisma.$transaction(async (tx) => {
+      // Marcar alquiler como entregado
+      const updatedRental = await tx.rental.update({
+        where: { id: rentalId },
+        data: {
+          status: "DELIVERED",
+          actualReturnDate: new Date(),
+        },
+        include: {
+          washingMachine: {
+            select: { id: true, description: true, pricePerHour: true },
+          },
+          client: {
+            select: {
+              id: true,
+              nombre: true,
+              identificacion: true,
+              telefono: true,
+            },
+          },
+          user: {
+            select: { id: true, nombre: true, username: true },
+          },
+        },
+      });
+
+      // Aumentar cantidad disponible de lavadora
+      await tx.washingMachine.update({
+        where: { id: rental.washingMachineId },
+        data: { availableQuantity: { increment: 1 } },
+      });
+
+      return updatedRental;
+    });
+
+    res.json(result);
+  } catch (error) {
+    console.error("Error al entregar alquiler:", error);
+    res.status(500).json({ error: "Error al entregar el alquiler" });
+  }
+});
+
+// GET /api/rentals/overdue - Listar alquileres atrasados (ADMIN)
+router.get("/rentals/overdue", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const now = new Date();
+
+    // Obtener alquileres atrasados
+    const overdueRentals = await prisma.rental.findMany({
+      where: {
+        status: "RENTED",
+        scheduledReturnDate: { lt: now },
+      },
+      include: {
+        washingMachine: {
+          select: { id: true, description: true, pricePerHour: true },
+        },
+        client: {
+          select: {
+            id: true,
+            nombre: true,
+            identificacion: true,
+            telefono: true,
+          },
+        },
+        user: {
+          select: { id: true, nombre: true, username: true },
+        },
+      },
+      orderBy: { scheduledReturnDate: "asc" },
+    });
+
+    // Actualizar estado a OVERDUE
+    await prisma.rental.updateMany({
+      where: {
+        status: "RENTED",
+        scheduledReturnDate: { lt: now },
+      },
+      data: { status: "OVERDUE" },
+    });
+
+    res.json({
+      overdueRentals,
+      count: overdueRentals.length,
+    });
+  } catch (error) {
+    console.error("Error al obtener alquileres atrasados:", error);
+    res.status(500).json({ error: "Error al obtener alquileres atrasados" });
+  }
+});
+
+// GET /api/rentals/reminders - Alquileres próximos a vencer (20 minutos) (ADMIN)
+router.get("/rentals/reminders", auth, async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(403).json({ error: "Solo ADMIN" });
+    }
+
+    const now = new Date();
+    const in20Minutes = new Date(now.getTime() + 20 * 60 * 1000);
+
+    // ✅ Obtener alquileres próximos Y vencidos
+    const rentals = await prisma.rental.findMany({
+      where: {
+        status: "RENTED",
+        OR: [
+          // ✅ Alquileres próximos (20 minutos antes)
+          {
+            scheduledReturnDate: {
+              gte: now,
+              lte: in20Minutes,
+            },
+          },
+          // ✅ Alquileres VENCIDOS (hora ya pasó)
+          {
+            scheduledReturnDate: {
+              lt: now, // Menor que ahora = vencido
+            },
+          },
+        ],
+      },
+      include: {
+        washingMachine: {
+          select: { id: true, description: true, pricePerHour: true },
+        },
+        client: {
+          select: {
+            id: true,
+            nombre: true,
+            identificacion: true,
+            telefono: true,
+          },
+        },
+        user: {
+          select: { id: true, nombre: true, username: true },
+        },
+      },
+      orderBy: { scheduledReturnDate: "asc" },
+    });
+
+    // ✅ Clasificar por estado
+    const classified = rentals.map(rental => ({
+      ...rental,
+      urgency: 
+        new Date(rental.scheduledReturnDate) < now ? 'OVERDUE' : 'PENDING',
+      statusText: 
+        new Date(rental.scheduledReturnDate) < now ? 'ALQUILER VENCIDO' : 'POR VENCER'
+    }));
+
+    const upcomingRentals = classified.filter(r => r.urgency === 'PENDING');
+    const overdueRentals = classified.filter(r => r.urgency === 'OVERDUE');
+
+    res.json({
+      rentals: classified, // Todos los alquileres
+      upcomingRentals,    // Solo próximos
+      overdueRentals,     // Solo vencidos
+      count: classified.length,
+      upcomingCount: upcomingRentals.length,
+      overdueCount: overdueRentals.length,
+      reminderTime: "20 minutos",
+    });
+  } catch (error) {
+    console.error("Error al obtener recordatorios:", error);
+    res.status(500).json({ error: "Error al obtener recordatorios" });
+  }
+});
+
+// PUT /api/rentals/:id - Actualizar alquiler (extender horas) (ADMIN/VENDEDOR)
+router.put("/rentals/:id", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      return res.status(403).json({ error: "Solo ADMIN o VENDEDOR" });
+    }
+
+    const rentalId = parseInt(req.params.id);
+    if (!rentalId || isNaN(rentalId)) {
+      return res.status(400).json({ error: "ID de alquiler inválido" });
+    }
+
+    const { scheduledReturnDate, additionalPrice } = req.body;
+
+    if (!scheduledReturnDate) {
+      return res
+        .status(400)
+        .json({ error: "scheduledReturnDate es requerido" });
+    }
+
+    // Verificar que el alquiler existe y está activo
+    const existingRental = await prisma.rental.findUnique({
+      where: { id: rentalId },
+      include: {
+        washingMachine: {
+          select: { id: true, description: true, pricePerHour: true },
+        },
+      },
+    });
+
+    if (!existingRental) {
+      return res.status(404).json({ error: "Alquiler no encontrado" });
+    }
+
+    if (existingRental.status !== "RENTED") {
+      return res
+        .status(400)
+        .json({ error: "Solo se pueden extender alquileres activos" });
+    }
+
+    // Validar que la nueva fecha sea futura
+    const newReturnDate = new Date(scheduledReturnDate);
+    if (newReturnDate <= new Date()) {
+      return res
+        .status(400)
+        .json({ error: "La nueva fecha de devolución debe ser futura" });
+    }
+
+    // Calcular nuevas horas y precio
+    const rentalDate = new Date(existingRental.rentalDate);
+    const hoursDiff = Math.ceil(
+      (newReturnDate - rentalDate) / (1000 * 60 * 60)
+    );
+    const newRentalPrice =
+      Number(existingRental.washingMachine.pricePerHour) * hoursDiff;
+
+    // Actualizar alquiler
+    const updatedRental = await prisma.rental.update({
+      where: { id: rentalId },
+      data: {
+        scheduledReturnDate: newReturnDate,
+        hoursRented: hoursDiff,
+        rentalPrice: String(newRentalPrice),
+        notes: additionalPrice
+          ? `${
+              existingRental.notes || ""
+            }\nRecargo adicional: $${additionalPrice}`.trim()
+          : existingRental.notes,
+      },
+      include: {
+        washingMachine: {
+          select: { id: true, description: true, pricePerHour: true },
+        },
+        client: {
+          select: {
+            id: true,
+            nombre: true,
+            identificacion: true,
+            telefono: true,
+          },
+        },
+        user: {
+          select: { id: true, nombre: true, username: true },
+        },
+      },
+    });
+
+    res.json(updatedRental);
+  } catch (error) {
+    console.error("Error al actualizar alquiler:", error);
+    res.status(500).json({ error: "Error al actualizar el alquiler" });
+  }
+});
+
+// GET /api/reports/rentals-history - Historial completo de alquileres (ADMIN/VENDEDOR)
+router.get("/reports/rentals-history", auth, async (req, res) => {
+  try {
+    if (
+      !req.user ||
+      (req.user.role !== "ADMIN" && req.user.role !== "VENDEDOR")
+    ) {
+      return res.status(403).json({ error: "Solo ADMIN o VENDEDOR" });
+    }
+
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      clientId,
+      startDate,
+      endDate,
+    } = req.query;
+
+    const pageNumber = Math.max(1, parseInt(page) || 1);
+    const limitNumber = Math.min(100, Math.max(1, parseInt(limit) || 10));
+    const skip = (pageNumber - 1) * limitNumber;
+
+    // Construir filtro
+    const where = {};
+    if (status) {
+      where.status = status;
+    }
+    if (clientId) {
+      where.clientId = Number(clientId);
+    }
+    if (startDate || endDate) {
+      where.rentalDate = {};
+      if (startDate) {
+        where.rentalDate.gte = new Date(startDate);
+      }
+      if (endDate) {
+        where.rentalDate.lte = new Date(endDate + "T23:59:59.999Z");
+      }
+    }
+
+    // Obtener alquileres con relaciones
+    const [rentals, total] = await Promise.all([
+      prisma.rental.findMany({
+        where,
+        include: {
+          washingMachine: {
+            select: {
+              id: true,
+              description: true,
+              pricePerHour: true,
+            },
+          },
+          client: {
+            select: {
+              id: true,
+              nombre: true,
+              identificacion: true,
+              telefono: true,
+            },
+          },
+          user: {
+            select: {
+              id: true,
+              nombre: true,
+              username: true,
+            },
+          },
+        },
+        orderBy: { rentalDate: "desc" },
+        skip,
+        take: limitNumber,
+      }),
+      prisma.rental.count({ where }),
+    ]);
+
+    // Calcular estadísticas
+    const stats = await prisma.rental.groupBy({
+      by: ["status"],
+      where:
+        startDate || endDate
+          ? {
+              rentalDate: {
+                gte: startDate ? new Date(startDate) : undefined,
+                lte: endDate ? new Date(endDate + "T23:59:59.999Z") : undefined,
+              },
+            }
+          : {},
+      _count: { id: true },
+      _sum: { rentalPrice: true },
+    });
+
+    const totalPages = Math.ceil(total / limitNumber);
+
+    res.json({
+      data: rentals,
+      pagination: {
+        currentPage: pageNumber,
+        totalPages,
+        totalItems: total,
+        itemsPerPage: limitNumber,
+        hasNextPage: pageNumber < totalPages,
+        hasPreviousPage: pageNumber > 1,
+      },
+      stats: stats.reduce((acc, stat) => {
+        acc[stat.status] = {
+          count: stat._count.id,
+          totalRevenue: Number(stat._sum.rentalPrice || 0),
+        };
+        return acc;
+      }, {}),
+    });
+  } catch (error) {
+    console.error("Error al obtener historial de alquileres:", error);
+    res.status(500).json({ error: "Error al obtener historial de alquileres" });
+  }
+});
+
+// POST /api/payments - Registrar pago de cuota individual (protegido)
+router.post("/payments", auth, async (req, res) => {
+  const { installmentId, amount, paymentMethod } = req.body || {};
+
+  if (!installmentId)
+    return res.status(400).json({ error: "installmentId es requerido" });
+  if (!amount || amount <= 0)
+    return res.status(400).json({ error: "amount debe ser mayor a 0" });
+  if (!paymentMethod)
+    return res.status(400).json({ error: "paymentMethod es requerido" });
+
+  try {
+    const result = await prisma.$transaction(async (tx) => {
+      // Verificar que la cuota existe y está pendiente
+      const installment = await tx.creditInstallment.findUnique({
+        where: { id: Number(installmentId) },
+        include: {
+          sale: {
+            include: {
+              client: { select: { id: true, nombre: true } },
+              creditInstallments: {
+                where: { status: "PENDING" },
+              },
+            },
+          },
+        },
+      });
+
+      if (!installment) throw { status: 404, message: "Cuota no encontrada" };
+      if (installment.status === "PAID")
+        throw { status: 400, message: "Esta cuota ya está pagada" };
+      if (installment.status === "OVERDUE")
+        throw { status: 400, message: "Esta cuota está vencida" };
+
+      // Verificar que el monto coincida con el valor de la cuota
+      const installmentAmount = Number(installment.amountDue);
+      if (Number(amount) !== installmentAmount) {
+        throw {
+          status: 400,
+          message: `El monto pagado ($${amount}) no coincide con el valor de la cuota ($${installmentAmount})`,
+        };
+      }
+
+      // Registrar el pago
+      const payment = await tx.payment.create({
+        data: {
+          saleId: installment.saleId,
+          amount: Number(amount),
+          paymentMethod: String(paymentMethod),
+          date: new Date(),
+        },
+      });
+
+      // Actualizar estado de la cuota
+      const updatedInstallment = await tx.creditInstallment.update({
+        where: { id: Number(installmentId) },
+        data: {
+          status: "PAID",
+          paidAt: new Date(),
+        },
+      });
+
+      // Verificar si todas las cuotas de la venta están pagadas
+      const remainingPendingInstallments = await tx.creditInstallment.count({
+        where: {
+          saleId: installment.saleId,
+          status: "PENDING",
+        },
+      });
+
+      // Si no hay cuotas pendientes, actualizar el estado de la venta
+      if (remainingPendingInstallments === 0) {
+        await tx.sale.update({
+          where: { id: installment.saleId },
+          data: {
+            paymentStatus: "PAID",
+          },
+        });
+      }
+
+      // Obtener información actualizada de la venta
+      const updatedSale = await tx.sale.findUnique({
+        where: { id: installment.saleId },
+        include: {
+          client: { select: { id: true, nombre: true } },
+          creditInstallments: {
+            orderBy: { installmentNumber: "asc" },
+          },
+          payments: {
+            orderBy: { date: "desc" },
+            take: 5,
+          },
+        },
+      });
+
+      return {
+        payment,
+        installment: updatedInstallment,
+        sale: updatedSale,
+        previousStatus: installment.status,
+        newStatus: "PAID",
+        amountPaid: Number(amount),
+        remainingInstallments: remainingPendingInstallments,
+      };
+    });
+
+    res.status(201).json({
+      message: "Cuota pagada exitosamente",
+      ...result,
+    });
+  } catch (err) {
+    console.error(err);
+    if (err && err.status)
+      return res.status(err.status).json({ error: err.message });
+    res.status(500).json({ error: "Error registrando pago de cuota" });
+  }
+});
+// GET /api/reminders - Obtener cuotas por vencer y vencidas
+
+router.get("/reminders", auth, async (req, res) => {
+  try {
+    const threeDaysFromNow = new Date();
+    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 2);
+    
+    const reminders = await prisma.creditInstallment.findMany({
+      where: {
+        status: "PENDING",
+        dueDate: {
+          lte: threeDaysFromNow
+        }
+      },
+      include: {
+        sale: {
+          include: {
+            client: {
+              select: {
+                id: true,
+                nombre: true,
+                telefono: true
+              }
+            }
+          }
+        }
+      },
+      orderBy: {
+        dueDate: 'asc'
+      }
+    });
+    
+    res.json(reminders);
+  } catch (error) {
+    console.error("Error obteniendo recordatorios:", error);
+    res.status(500).json({ error: "Error obteniendo recordatorios" });
+  }
+});
+export default router;

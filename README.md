@@ -10,8 +10,13 @@ Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrerí
 - 👥 **Gestión de clientes** con historial de compras
 - 📊 **Reportes y análisis** con exportación a Excel
 - 🔐 **Sistema de usuarios** con roles (ADMIN/VENDEDOR)
-- 💳 **Múltiples métodos de pago** (Efectivo, Nequi)
+- 💳 **Múltiples métodos de pago** (Efectivo, Nequi, Tarjeta, Transferencia)
 - 🏭 **Control de envases** (cascos) en transacciones de gas
+- ⏰ **Sistema de recordatorios** para pagos y devoluciones
+- 🚨 **Alertas visuales** para cuotas vencidas y por vencer
+- 💬 **Notificaciones WhatsApp** automáticas
+- 🧺 **Gestión de alquileres** de lavadoras con control de tiempo
+
 
 ## Arquitectura
 
@@ -38,6 +43,28 @@ Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrerí
 - **GasType**: Gestión de tipos de gas (cilindros llenos/vacíos)
 - **Sale/SaleItem**: Sistema de ventas flexible
 - **Company**: Configuración de datos de la empresa
+
+## 🎯 Sistema de Recordatorios y Alertas
+
+### Recordatorios de Pagos (AccountsReceivable)
+- ⏰ **Alertas automáticas** 2 días antes del vencimiento de cuotas
+- 🚨 **Badges visuales** en tabla de deudas:
+  - ⚠️ **Rojo**: Cuotas vencidas
+  - ⏰ **Amarillo**: Cuotas por vencer (3 días)
+- 💬 **WhatsApp automático** con mensaje personalizado
+- ✅ **Marcar como notificado** para gestión de seguimiento
+
+### Recordatorios de Alquileres (WashingMachines)
+- 🚚 **Alertas de devolución** 20 minutos antes
+- 🔴 **Alquileres vencidos** visibles hasta ser devueltos
+- 📱 **Notificaciones WhatsApp** para clientes
+- ✅ **Botón "Devuelto"** para actualizar estado automáticamente
+
+### Características Técnicas
+- 🔄 **Actualización automática** cada 60 segundos
+- 🎨 **Diseño diferenciado** por estado (vencido/próximo)
+- 📊 **Dashboard informativo** con estadísticas
+- 🔔 **Sistema de notificaciones** integrado
 
 ## Requisitos
 

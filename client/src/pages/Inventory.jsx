@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
+import ModalConfirmacion from '../components/ModalConfirmación'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
-
 export default function Inventory() {
   const token = localStorage.getItem('auth_token')
   const headers = useMemo(() => ({
@@ -33,9 +33,16 @@ export default function Inventory() {
   const [gPage, setGPage] = useState(1)
   const gPageSize = 10
 
-  // Modals
-  const [productModal, setProductModal] = useState({ open: false, mode: 'create', record: null })
-  const [gasModal, setGasModal] = useState({ open: false, mode: 'create', record: null })
+// Modals
+const [productModal, setProductModal] = useState({ open: false, mode: 'create', record: null })
+const [gasModal, setGasModal] = useState({ open: false, mode: 'create', record: null })
+
+// Después de los modales existentes, agrega:
+const [showDeleteProductModal, setShowDeleteProductModal] = useState(false)
+const [productToDelete, setProductToDelete] = useState(null)
+
+const [showDeleteGasModal, setShowDeleteGasModal] = useState(false)
+const [gasToDelete, setGasToDelete] = useState(null)
 
   // Product form
   const [pForm, setPForm] = useState({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', stock: 0, stock_minimo: 5 })
@@ -167,19 +174,42 @@ export default function Inventory() {
     }
   }
 
-  const handleDeleteProduct = async (record) => {
-    try {
-      if (!record) return
-      if (!confirm(`¿Eliminar producto "${record.nombre}"?`)) return
-      const res = await fetch(`${API_URL}/products/${record.id}`, { method: 'DELETE', headers })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Error eliminando producto')
-      await loadData()
-      toast('Producto eliminado', 'success')
-    } catch (e) {
-      toast(e.message || 'Error eliminando producto', 'error')
-    }
+// DESPUÉS:
+const handleDeleteProduct = async (record) => {
+  try {
+    if (!record) return
+    // Eliminar el confirm() antiguo
+    setProductToDelete(record)
+    setShowDeleteProductModal(true)
+  } catch (e) {
+    toast(e.message || 'Error eliminando producto', 'error')
   }
+}
+
+// AGREGAR esta nueva función:
+const confirmDeleteProduct = async () => {
+  try {
+    if (!productToDelete) return
+    const res = await fetch(`${API_URL}/products/${productToDelete.id}`, { 
+      method: 'DELETE', 
+      headers 
+    })
+    const data = await res.json()
+    
+    if (!res.ok) {
+      // Mostrará el error específico del backend
+      throw new Error(data.error || 'Error eliminando producto')
+    }
+    
+    await loadData()
+    toast('Producto eliminado', 'success')
+    setShowDeleteProductModal(false)
+    setProductToDelete(null)
+  } catch (e) {
+    // El toast mostrará el mensaje amigable del backend
+    toast(e.message || 'Error eliminando producto', 'error')
+  }
+}
 
   const handleCreateGas = async () => {
     try {
@@ -212,19 +242,40 @@ export default function Inventory() {
     }
   }
 
-  const handleDeleteGas = async (record) => {
-    try {
-      if (!record) return
-      if (!confirm(`¿Eliminar tipo de gas "${record.nombre}"?`)) return
-      const res = await fetch(`${API_URL}/gastypes/${record.id}`, { method: 'DELETE', headers })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data?.error || 'Error eliminando tipo de gas')
-      await loadData()
-      toast('Tipo de gas eliminado', 'success')
-    } catch (e) {
-      toast(e.message || 'Error eliminando tipo de gas', 'error')
-    }
+  // DESPUÉS:
+const handleDeleteGas = async (record) => {
+  try {
+    if (!record) return
+    // Eliminar el confirm() antiguo
+    setGasToDelete(record)
+    setShowDeleteGasModal(true)
+  } catch (e) {
+    toast(e.message || 'Error eliminando tipo de gas', 'error')
   }
+}
+
+// AGREGAR esta nueva función:
+const confirmDeleteGas = async () => {
+  try {
+    if (!gasToDelete) return
+    const res = await fetch(`${API_URL}/gastypes/${gasToDelete.id}`, { 
+      method: 'DELETE', 
+      headers 
+    })
+    const data = await res.json()
+    
+    if (!res.ok) {
+      throw new Error(data.error || 'Error eliminando tipo de gas')
+    }
+    
+    await loadData()
+    toast('Tipo de gas eliminado', 'success')
+    setShowDeleteGasModal(false)
+    setGasToDelete(null)
+  } catch (e) {
+    toast(e.message || 'Error eliminando tipo de gas', 'error')
+  }
+}
 
   return (
     <div className="space-y-6">
@@ -485,6 +536,34 @@ export default function Inventory() {
           )}
         </section>
       )}
+
+      {/* Modal de Confirmación de Eliminación - Producto */}
+<ModalConfirmacion
+  isOpen={showDeleteProductModal}
+  onClose={() => {
+    setShowDeleteProductModal(false)
+    setProductToDelete(null)
+  }}
+  onConfirm={confirmDeleteProduct}
+  title="Eliminar Producto"
+  message={`¿Está seguro de que desea eliminar el producto "${productToDelete?.nombre}"? Esta acción no se puede deshacer.`}
+  confirmText="Eliminar"
+  cancelText="Cancelar"
+/>
+
+{/* Modal de Confirmación de Eliminación - Gas */}
+<ModalConfirmacion
+  isOpen={showDeleteGasModal}
+  onClose={() => {
+    setShowDeleteGasModal(false)
+    setGasToDelete(null)
+  }}
+  onConfirm={confirmDeleteGas}
+  title="Eliminar Tipo de Gas"
+  message={`¿Está seguro de que desea eliminar el tipo de gas "${gasToDelete?.nombre}"? Esta acción no se puede deshacer.`}
+  confirmText="Eliminar"
+  cancelText="Cancelar"
+/>
     </div>
   )
 }

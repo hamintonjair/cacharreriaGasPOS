@@ -17,18 +17,18 @@ export default function Layout({
             <div className="text-lg font-bold">Menú</div>
           </div>
           <nav className="flex-1 p-3 space-y-2">
-                {isAdmin && (
-            <button
-              onClick={() => setView("DASHBOARD")}
-              className={`w-full h-12 rounded-lg px-3 text-left font-semibold ${
-                view === "DASHBOARD"
-                  ? "bg-white text-gray-900"
-                  : "bg-white/10 hover:bg-white/20"
-              }`}
-            >
-              🏡 Dashboard
-            </button>
-               )}
+            {isAdmin && (
+              <button
+                onClick={() => setView("DASHBOARD")}
+                className={`w-full h-12 rounded-lg px-3 text-left font-semibold ${
+                  view === "DASHBOARD"
+                    ? "bg-white text-gray-900"
+                    : "bg-white/10 hover:bg-white/20"
+                }`}
+              >
+                🏡 Dashboard
+              </button>
+            )}
             {isAdmin && (
               <button
                 onClick={() => setView("COMPANY")}
@@ -112,6 +112,42 @@ export default function Layout({
                 👥 Usuarios
               </button>
             )}
+            {isAdmin && (
+              <button
+                onClick={() => setView("WASHING_MACHINES")}
+                className={`w-full h-12 rounded-lg px-3 text-left font-semibold ${
+                  view === "WASHING_MACHINES"
+                    ? "bg-white text-gray-900"
+                    : "bg-white/10 hover:bg-white/20"
+                }`}
+              >
+                🧺 Lavadoras
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => setView("ACCOUNTS_RECEIVABLE")}
+                className={`w-full h-12 rounded-lg px-3 text-left font-semibold ${
+                  view === "ACCOUNTS_RECEIVABLE"
+                    ? "bg-white text-gray-900"
+                    : "bg-white/10 hover:bg-white/20"
+                }`}
+              >
+                💰 Cuentas por Cobrar
+              </button>
+            )}
+            {isAdmin && (
+              <button
+                onClick={() => setView("RENTAL_REPORT")} // <-- CAMBIAR ESTO
+                className={`w-full h-12 rounded-lg px-3 text-left font-semibold ${
+                  view === "RENTAL_REPORT" // <-- Y ESTO
+                    ? "bg-white text-gray-900"
+                    : "bg-white/10 hover:bg-white/20"
+                }`}
+              >
+                📊 Historial de Alquileres
+              </button>
+            )}
           </nav>
           <div className="p-3 border-t border-white/10">
             <button
@@ -148,6 +184,8 @@ export default function Layout({
               {isAdmin && <option value="CATEGORIES">Categorías</option>}
               {isAdmin && <option value="CLIENTS">Clientes</option>}
               {isAdmin && <option value="USERS">Usuarios</option>}
+              {isAdmin && <option value="WASHING_MACHINES">Lavadoras</option>}
+              {isAdmin && <option value="RENTAL_REPORT">Historial de Alquileres</option>}
             </select>
             <button
               onClick={onLogout}

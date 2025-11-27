@@ -18,6 +18,7 @@ model User {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   sales     Sale[]
+  rentals   Rental[]
 
   @@map("users")
 }
@@ -38,6 +39,7 @@ model Client {
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   sales        Sale[]
+  rentals      Rental[]
 
   @@map("clients")
 }
@@ -69,16 +71,35 @@ model GasType {
 }
 
 model Sale {
-  id          Int        @id @default(autoincrement())
-  fecha       DateTime   @default(now())
-  total       Decimal    @db.Decimal(10, 2)
-  metodo_pago String     // Efectivo, Nequi
-  userId      Int
-  user        User       @relation(fields: [userId], references: [id])
-  clientId    Int?
-  client      Client?    @relation(fields: [clientId], references: [id])
+  id           Int       @id @default(autoincrement())
+  total        Decimal   @db.Decimal(10, 2)
+  paymentStatus String   @default("PAID") // PAID, PENDING, PARTIAL
+  totalPaid    Decimal   @default(0) @db.Decimal(10, 2)
+  clientId     Int       // Obligatorio para crédito
+  userId       Int
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
-  items       SaleItem[]
+  client       Client    @relation(fields: [clientId], references: [id])
+  user         User      @relation(fields: [userId], references: [id])
+  payments     Payment[] // Nueva relación
+  creditInstallments CreditInstallment[] // Agregar esta relación
+
+  items        SaleItem[] // ← AGREGA ESTA LÍNEA
+  @@map("sales")
+}
+
+model Payment {
+  id           Int       @id @default(autoincrement())
+  saleId       Int
+  amount       Decimal   @db.Decimal(10, 2)
+  paymentMethod String   // CASH, TRANSFER, CREDIT_CARD, CREDIT
+  date         DateTime  @default(now())
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  sale         Sale      @relation(fields: [saleId], references: [id])
+
+  @@map("payments")
 }
 
 model SaleItem {
@@ -114,4 +135,72 @@ model Company {
   updatedAt DateTime  @updatedAt @map("updated_at")
 
   @@map("companies")
+}
+
+// Modelo de Lavadoras para Alquiler
+model WashingMachine {
+  id                  Int      @id @default(autoincrement())
+  description         String   // Ej: "Lavadora Samsung 8kg"
+  pricePerHour        Decimal  @db.Decimal(10, 2) // Precio por hora de alquiler
+  initialQuantity     Int      @default(1) // Cantidad inicial de lavadoras de este modelo
+  availableQuantity   Int      @default(1) // Cantidad actualmente disponible para alquiler
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  rentals             Rental[]
+
+  @@map("washing_machines")
+}
+
+// Modelo de Alquileres
+model Rental {
+  id                   Int       @id @default(autoincrement())
+  washingMachineId     Int
+  washingMachine       WashingMachine @relation(fields: [washingMachineId], references: [id])
+  clientId             Int
+  client               Client @relation(fields: [clientId], references: [id])
+  rentalPrice          Decimal   @db.Decimal(10, 2) // Precio total cobrado
+  rentalDate           DateTime  @default(now()) @map("rental_date") // Fecha/hora de inicio
+  scheduledReturnDate  DateTime  @map("scheduled_return_date") // Fecha/hora programada de entrega
+  actualReturnDate     DateTime? @map("actual_return_date") // Fecha/hora real de entrega
+  status               RentalStatus @default(RENTED) // Estado del alquiler
+  userId               Int       // Usuario que registró el alquiler
+  user                 User      @relation(fields: [userId], references: [id])
+  hoursRented          Int       @default(1) // Cantidad de horas alquiladas
+  notes                String?   // Notas adicionales
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@map("rentals")
+}
+
+// Modelo de Cuotas de Crédito
+model CreditInstallment {
+  id               Int              @id @default(autoincrement())
+  saleId           Int
+  sale             Sale             @relation(fields: [saleId], references: [id])
+  installmentNumber Int             // Número de cuota (1, 2, 3, ...)
+  amountDue        Decimal          @db.Decimal(10, 2) // Valor de la cuota
+  dueDate          DateTime         // Fecha de vencimiento
+  status           InstallmentStatus @default(PENDING)
+  paidAt           DateTime?        // Fecha de pago
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@map("credit_installments")
+}
+
+// Enum para estados de cuotas
+enum InstallmentStatus {
+  PENDING  // Pendiente de pago
+  PAID     // Pagada
+  OVERDUE  // Vencida
+}
+
+// Enum para estados de alquiler
+enum RentalStatus {
+  RENTED    // Alquilada actualmente
+  OVERDUE   // Atrasada (pasó la fecha programada)
+  DELIVERED // Devuelta
+  CANCELLED // Cancelada
 }

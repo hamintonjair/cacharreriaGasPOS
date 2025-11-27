@@ -330,6 +330,7 @@ export default function Dashboard() {
           )}
         </ReportCard>
 
+
         {/* Sales Summary Section */}
         <ReportCard title="Resumen de Ventas">
           {loadingSummary ? (

@@ -1,4 +1,5 @@
-import React, { useEffect, useState } from 'react'
+import React, { useState, useEffect } from 'react'
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import Login from './pages/Login.jsx'
 import POS from './pages/POS.jsx'
 import Dashboard from './pages/Dashboard.jsx'
@@ -9,6 +10,9 @@ import Users from './pages/Users.jsx'
 import Categories from './pages/Categories.jsx'
 import Clients from './pages/Clients.jsx'
 import Company from './pages/Company.jsx'
+import WashingMachines from './pages/WashingMachines.jsx'
+import RentalReport from './pages/RentalReport.jsx'
+import AccountsReceivable from './pages/AccountsReceivable.jsx'
 import Toasts from './components/Toasts.jsx'
 
 function App() {
@@ -67,24 +71,56 @@ function App() {
       return <Clients /> // Este caso ahora es accesible para ADMIN y VENDEDOR
     case 'COMPANY':
       return <Company />
+    case 'WASHING_MACHINES':
+      return <WashingMachines />
+    case 'RENTAL_REPORT':  // <-- AGREGAR ESTO
+      return <RentalReport />
+    case 'ACCOUNTS_RECEIVABLE':
+      return <AccountsReceivable />
     default:
       return <POS />
   }
 }
 
   return (
-    <>
-      <Toasts />
-      <Layout
-        user={auth.user}
-        isAdmin={isAdmin}
-        view={view}
-        setView={setView}
-        onLogout={handleLogout}
-      >
-        {renderView()}
-      </Layout>
-    </>
+    <Router>
+      <>
+        <Toasts />
+        <Routes>
+          <Route path="/login" element={<Login onSuccess={handleLoginSuccess} />} />
+          <Route path="/*" element={
+            auth.token ? (
+              <Layout
+                user={auth.user}
+                isAdmin={isAdmin}
+                view={view}
+                setView={setView}
+                onLogout={handleLogout}
+              >
+                {renderView()}
+              </Layout>
+            ) : (
+              <Login onSuccess={handleLoginSuccess} />
+            )
+          } />
+          <Route path="/reports/rentals-history" element={
+            auth.token && isAdmin ? (
+              <Layout
+                user={auth.user}
+                isAdmin={isAdmin}
+                view="REPORTS"
+                setView={setView}
+                onLogout={handleLogout}
+              >
+                <RentalReport />
+              </Layout>
+            ) : (
+              <Login onSuccess={handleLoginSuccess} />
+            )
+          } />
+        </Routes>
+      </>
+    </Router>
   )
 }
 

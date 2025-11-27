@@ -34,8 +34,7 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
           <div className="flex-1">
             {company.logo_url && (
               <img 
-                src={`https://cacharreriagaspos.onrender.com${company.logo_url}`} 
-                  // src={`http://localhost:5000${company.logo_url}`} 
+                src={`http://localhost:5000${company.logo_url}`} 
                 alt="Logo" 
                 className="h-16 mb-2"
               />
@@ -78,7 +77,7 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
         </div>
       </div>
 
-      {/* Items Table */}
+          {/* Items Table */}
       <div className="mb-4">
         <table className="w-full text-sm">
           <thead className="border-t border-b">
@@ -108,6 +107,42 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
           </tbody>
         </table>
       </div>
+
+      {/* 🔥 NUEVO: Sección de Cuotas de Crédito */}
+      {sale.creditInstallments && sale.creditInstallments.length > 0 && (
+        <div className="mb-4 border-t pt-4">
+          <h4 className="font-bold text-sm mb-3 text-center bg-gray-100 py-2">
+            CUOTAS DE CRÉDITO
+          </h4>
+          <div className="space-y-1">
+            {sale.creditInstallments.map((installment, index) => (
+              <div key={index} className="flex justify-between text-xs py-1 border-b">
+                <span className="flex-1">
+                  Cuota {installment.installmentNumber} - 
+                  {new Date(installment.dueDate).toLocaleDateString('es-EC', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit'
+                  })}
+                </span>
+                <span className="font-semibold text-right min-w-[80px]">
+                  {formatCurrency(installment.amountDue)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-2 pt-2 border-t flex justify-between font-bold text-sm">
+            <span>Total Crédito:</span>
+            <span>
+              {formatCurrency(
+                sale.creditInstallments.reduce((sum, installment) => 
+                  sum + Number(installment.amountDue), 0
+                )
+              )}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Totals */}
       <div className="border-t-2 border-gray-900 pt-2">
