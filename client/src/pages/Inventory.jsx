@@ -45,7 +45,7 @@ const [showDeleteGasModal, setShowDeleteGasModal] = useState(false)
 const [gasToDelete, setGasToDelete] = useState(null)
 
   // Product form
-  const [pForm, setPForm] = useState({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', stock: 0, stock_minimo: 5 })
+  const [pForm, setPForm] = useState({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', taxRate: '', stock: 0, stock_minimo: 5 })
   // Gas form
   const [gForm, setGForm] = useState({ nombre: '', precio_venta: '', precio_envase: '', stock_llenos: 0, stock_vacios: 0 })
 
@@ -144,12 +144,29 @@ const [gasToDelete, setGasToDelete] = useState(null)
   const handleCreateProduct = async () => {
     try {
       if (!pForm.nombre || pForm.precio_venta === '' || pForm.costo === '') throw new Error('Completa nombre, precio y costo')
-      const body = { ...pForm, categoryId: pForm.categoryId ? Number(pForm.categoryId) : undefined }
+      
+      // Convertir IVA de porcentaje a decimal antes de enviar
+      // Manejar valores vacíos, null, undefined y convertir a string decimal válido
+      let taxRateDecimal = '0'
+      if (pForm.taxRate !== null && pForm.taxRate !== undefined && pForm.taxRate !== '') {
+        const taxRateNum = Number(pForm.taxRate)
+        if (!isNaN(taxRateNum) && taxRateNum >= 0) {
+          // Convertir de porcentaje (ej: 19) a decimal (ej: 0.19)
+          taxRateDecimal = (taxRateNum / 100).toFixed(4)
+        }
+      }
+      
+      const body = { 
+        ...pForm, 
+        taxRate: taxRateDecimal, // Enviar como string decimal (ej: "0.19")
+        categoryId: pForm.categoryId ? Number(pForm.categoryId) : undefined 
+      }
+      
       const res = await fetch(`${API_URL}/products`, { method: 'POST', headers, body: JSON.stringify(body) })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Error creando producto')
       setProductModal({ open: false, mode: 'create', record: null })
-      setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', stock: 0, stock_minimo: 5 })
+      setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', taxRate: '', stock: 0, stock_minimo: 5 })
       await loadData()
       toast('Producto creado', 'success')
     } catch (e) {
@@ -162,7 +179,24 @@ const [gasToDelete, setGasToDelete] = useState(null)
       if (!productModal.record) return
       if (!pForm.nombre || pForm.precio_venta === '' || pForm.costo === '') throw new Error('Completa nombre, precio y costo')
       const id = productModal.record.id
-      const body = { ...pForm, categoryId: pForm.categoryId ? Number(pForm.categoryId) : undefined }
+      
+      // Convertir IVA de porcentaje a decimal antes de enviar
+      // Manejar valores vacíos, null, undefined y convertir a string decimal válido
+      let taxRateDecimal = '0'
+      if (pForm.taxRate !== null && pForm.taxRate !== undefined && pForm.taxRate !== '') {
+        const taxRateNum = Number(pForm.taxRate)
+        if (!isNaN(taxRateNum) && taxRateNum >= 0) {
+          // Convertir de porcentaje (ej: 19) a decimal (ej: 0.19)
+          taxRateDecimal = (taxRateNum / 100).toFixed(4)
+        }
+      }
+      
+      const body = { 
+        ...pForm, 
+        taxRate: taxRateDecimal, // Enviar como string decimal (ej: "0.19")
+        categoryId: pForm.categoryId ? Number(pForm.categoryId) : undefined 
+      }
+      
       const res = await fetch(`${API_URL}/products/${id}`, { method: 'PUT', headers, body: JSON.stringify(body) })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.error || 'Error actualizando producto')
@@ -332,6 +366,7 @@ const confirmDeleteGas = async () => {
                   <th className="p-2 text-left border">Categoría</th>
                   <th className="p-2 text-right border">Precio Venta</th>
                   <th className="p-2 text-right border">Costo</th>
+                  <th className="p-2 text-right border">IVA</th>
                   <th className="p-2 text-right border">Stock</th>
                   <th className="p-2 text-right border">Stock Mínimo</th>
                   <th className="p-2 text-center border">Acciones</th>
@@ -345,13 +380,14 @@ const confirmDeleteGas = async () => {
                     <td className="p-2 border">{categoriesMap[p.categoryId]?.nombre || '-'}</td>
                     <td className="p-2 border text-right">${Number(p.precio_venta).toLocaleString()}</td>
                     <td className="p-2 border text-right">${Number(p.costo).toLocaleString()}</td>
+                    <td className="p-2 border text-right">{p.taxRate ? `${(Number(p.taxRate) * 100).toFixed(1)}%` : '0%'}</td>
                     <td className="p-2 border text-right">{p.stock}</td>
                     <td className="p-2 border text-right">{p.stock_minimo}</td>
                     <td className="p-2 border text-center">
                       <div className="flex items-center justify-center gap-2">
                         <button
                           className="h-9 px-3 rounded bg-indigo-600 text-white"
-                          onClick={()=>{ setProductModal({open:true,mode:'edit',record:p}); setPForm({ nombre:p.nombre, codigo_barras:p.codigo_barras||'', categoryId:String(p.categoryId||''), precio_venta:p.precio_venta, costo:p.costo, stock:p.stock, stock_minimo:p.stock_minimo }) }}
+                          onClick={()=>{ setProductModal({open:true,mode:'edit',record:p}); setPForm({ nombre:p.nombre, codigo_barras:p.codigo_barras||'', categoryId:String(p.categoryId||''), precio_venta:p.precio_venta, costo:p.costo, taxRate: p.taxRate ? (Number(p.taxRate) * 100).toString() : '', stock:p.stock, stock_minimo:p.stock_minimo }) }}
                         >📝 </button>
                         <button
                           className="h-9 px-3 rounded bg-red-600 text-white"
@@ -388,13 +424,14 @@ const confirmDeleteGas = async () => {
                   </select>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Precio Venta" value={pForm.precio_venta} onChange={e=>setPForm({...pForm, precio_venta:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Costo" value={pForm.costo} onChange={e=>setPForm({...pForm, costo:e.target.value})}/>
+                  <input type="number" step="0.1" min="0" max="100" className="h-10 border rounded px-3" placeholder="IVA (%)" value={pForm.taxRate} onChange={e=>setPForm({...pForm, taxRate:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Stock" value={pForm.stock} onChange={e=>setPForm({...pForm, stock:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Stock Mínimo" value={pForm.stock_minimo} onChange={e=>setPForm({...pForm, stock_minimo:e.target.value})}/>
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
                   <button className="h-10 px-4 rounded bg-gray-100" onClick={()=>{
                   setProductModal({open:false,mode:'create'});
-                  setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', stock: 0, stock_minimo: 5 });
+                  setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', taxRate: '', stock: 0, stock_minimo: 5 });
                 }}>Cancelar</button>
                   <button className="h-10 px-4 rounded bg-gray-900 text-white" onClick={handleCreateProduct}>Guardar</button>
                 </div>
@@ -414,13 +451,14 @@ const confirmDeleteGas = async () => {
                   </select>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Precio Venta" value={pForm.precio_venta} onChange={e=>setPForm({...pForm, precio_venta:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Costo" value={pForm.costo} onChange={e=>setPForm({...pForm, costo:e.target.value})}/>
+                  <input type="number" step="0.1" min="0" max="100" className="h-10 border rounded px-3" placeholder="IVA (%)" value={pForm.taxRate} onChange={e=>setPForm({...pForm, taxRate:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Stock" value={pForm.stock} onChange={e=>setPForm({...pForm, stock:e.target.value})}/>
                   <input type="number" className="h-10 border rounded px-3" placeholder="Stock Mínimo" value={pForm.stock_minimo} onChange={e=>setPForm({...pForm, stock_minimo:e.target.value})}/>
                 </div>
                 <div className="mt-4 flex justify-end gap-2">
                   <button className="h-10 px-4 rounded bg-gray-100" onClick={()=>{
                   setProductModal({open:false,mode:'edit',record:null});
-                  setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', stock: 0, stock_minimo: 5 });
+                  setPForm({ nombre: '', codigo_barras: '', categoryId: '', precio_venta: '', costo: '', taxRate: '', stock: 0, stock_minimo: 5 });
                 }}>Cancelar</button>
                   <button className="h-10 px-4 rounded bg-gray-900 text-white" onClick={handleUpdateProduct}>Guardar</button>
                 </div>

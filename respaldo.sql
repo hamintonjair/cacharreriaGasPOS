@@ -33,6 +33,33 @@ ALTER SCHEMA public OWNER TO red_user;
 COMMENT ON SCHEMA public IS '';
 
 
+--
+-- Name: InstallmentStatus; Type: TYPE; Schema: public; Owner: red_user
+--
+
+CREATE TYPE public."InstallmentStatus" AS ENUM (
+    'PENDING',
+    'PAID',
+    'OVERDUE'
+);
+
+
+ALTER TYPE public."InstallmentStatus" OWNER TO red_user;
+
+--
+-- Name: RentalStatus; Type: TYPE; Schema: public; Owner: red_user
+--
+
+CREATE TYPE public."RentalStatus" AS ENUM (
+    'RENTED',
+    'OVERDUE',
+    'DELIVERED',
+    'CANCELLED'
+);
+
+
+ALTER TYPE public."RentalStatus" OWNER TO red_user;
+
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -150,22 +177,6 @@ ALTER SEQUENCE public."Product_id_seq" OWNED BY public."Product".id;
 
 
 --
--- Name: Sale; Type: TABLE; Schema: public; Owner: red_user
---
-
-CREATE TABLE public."Sale" (
-    id integer NOT NULL,
-    fecha timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    total numeric(10,2) NOT NULL,
-    metodo_pago text NOT NULL,
-    "userId" integer NOT NULL,
-    "clientId" integer
-);
-
-
-ALTER TABLE public."Sale" OWNER TO red_user;
-
---
 -- Name: SaleItem; Type: TABLE; Schema: public; Owner: red_user
 --
 
@@ -177,7 +188,9 @@ CREATE TABLE public."SaleItem" (
     cantidad integer NOT NULL,
     precio_unit numeric(10,2) NOT NULL,
     subtotal numeric(10,2) NOT NULL,
-    recibio_envase boolean DEFAULT false NOT NULL
+    recibio_envase boolean DEFAULT false NOT NULL,
+    "taxAmount" numeric(10,2) DEFAULT 0 NOT NULL,
+    "taxRateApplied" numeric(5,4) DEFAULT 0 NOT NULL
 );
 
 
@@ -204,46 +217,6 @@ ALTER SEQUENCE public."SaleItem_id_seq" OWNER TO red_user;
 
 ALTER SEQUENCE public."SaleItem_id_seq" OWNED BY public."SaleItem".id;
 
-
---
--- Name: Sale_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
---
-
-CREATE SEQUENCE public."Sale_id_seq"
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
-ALTER SEQUENCE public."Sale_id_seq" OWNER TO red_user;
-
---
--- Name: Sale_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
---
-
-ALTER SEQUENCE public."Sale_id_seq" OWNED BY public."Sale".id;
-
-
---
--- Name: _prisma_migrations; Type: TABLE; Schema: public; Owner: red_user
---
-
-CREATE TABLE public._prisma_migrations (
-    id character varying(36) NOT NULL,
-    checksum character varying(64) NOT NULL,
-    finished_at timestamp with time zone,
-    migration_name character varying(255) NOT NULL,
-    logs text,
-    rolled_back_at timestamp with time zone,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    applied_steps_count integer DEFAULT 0 NOT NULL
-);
-
-
-ALTER TABLE public._prisma_migrations OWNER TO red_user;
 
 --
 -- Name: clients; Type: TABLE; Schema: public; Owner: red_user
@@ -304,6 +277,170 @@ CREATE TABLE public.companies (
 ALTER TABLE public.companies OWNER TO red_user;
 
 --
+-- Name: credit_installments; Type: TABLE; Schema: public; Owner: red_user
+--
+
+CREATE TABLE public.credit_installments (
+    id integer NOT NULL,
+    "saleId" integer NOT NULL,
+    "installmentNumber" integer NOT NULL,
+    "amountDue" numeric(10,2) NOT NULL,
+    "dueDate" timestamp(3) without time zone NOT NULL,
+    status public."InstallmentStatus" DEFAULT 'PENDING'::public."InstallmentStatus" NOT NULL,
+    "paidAt" timestamp(3) without time zone,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) without time zone NOT NULL
+);
+
+
+ALTER TABLE public.credit_installments OWNER TO red_user;
+
+--
+-- Name: credit_installments_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
+--
+
+CREATE SEQUENCE public.credit_installments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.credit_installments_id_seq OWNER TO red_user;
+
+--
+-- Name: credit_installments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
+--
+
+ALTER SEQUENCE public.credit_installments_id_seq OWNED BY public.credit_installments.id;
+
+
+--
+-- Name: payments; Type: TABLE; Schema: public; Owner: red_user
+--
+
+CREATE TABLE public.payments (
+    id integer NOT NULL,
+    "saleId" integer NOT NULL,
+    amount numeric(10,2) NOT NULL,
+    "paymentMethod" text NOT NULL,
+    date timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+
+ALTER TABLE public.payments OWNER TO red_user;
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
+--
+
+CREATE SEQUENCE public.payments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.payments_id_seq OWNER TO red_user;
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
+--
+
+ALTER SEQUENCE public.payments_id_seq OWNED BY public.payments.id;
+
+
+--
+-- Name: rentals; Type: TABLE; Schema: public; Owner: red_user
+--
+
+CREATE TABLE public.rentals (
+    id integer NOT NULL,
+    "washingMachineId" integer NOT NULL,
+    "clientId" integer NOT NULL,
+    "rentalPrice" numeric(10,2) NOT NULL,
+    rental_date timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    scheduled_return_date timestamp(3) without time zone NOT NULL,
+    actual_return_date timestamp(3) without time zone,
+    status public."RentalStatus" DEFAULT 'RENTED'::public."RentalStatus" NOT NULL,
+    "userId" integer NOT NULL,
+    "hoursRented" integer DEFAULT 1 NOT NULL,
+    notes text,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) without time zone NOT NULL
+);
+
+
+ALTER TABLE public.rentals OWNER TO red_user;
+
+--
+-- Name: rentals_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
+--
+
+CREATE SEQUENCE public.rentals_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.rentals_id_seq OWNER TO red_user;
+
+--
+-- Name: rentals_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
+--
+
+ALTER SEQUENCE public.rentals_id_seq OWNED BY public.rentals.id;
+
+
+--
+-- Name: sales; Type: TABLE; Schema: public; Owner: red_user
+--
+
+CREATE TABLE public.sales (
+    id integer NOT NULL,
+    total numeric(10,2) NOT NULL,
+    "paymentStatus" text DEFAULT 'PAID'::text NOT NULL,
+    "totalPaid" numeric(10,2) DEFAULT 0 NOT NULL,
+    "clientId" integer NOT NULL,
+    "userId" integer NOT NULL,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) without time zone NOT NULL
+);
+
+
+ALTER TABLE public.sales OWNER TO red_user;
+
+--
+-- Name: sales_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
+--
+
+CREATE SEQUENCE public.sales_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.sales_id_seq OWNER TO red_user;
+
+--
+-- Name: sales_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
+--
+
+ALTER SEQUENCE public.sales_id_seq OWNED BY public.sales.id;
+
+
+--
 -- Name: users; Type: TABLE; Schema: public; Owner: red_user
 --
 
@@ -343,6 +480,45 @@ ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
+-- Name: washing_machines; Type: TABLE; Schema: public; Owner: red_user
+--
+
+CREATE TABLE public.washing_machines (
+    id integer NOT NULL,
+    description text NOT NULL,
+    "pricePerHour" numeric(10,2) NOT NULL,
+    "initialQuantity" integer DEFAULT 1 NOT NULL,
+    "availableQuantity" integer DEFAULT 1 NOT NULL,
+    created_at timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    updated_at timestamp(3) without time zone NOT NULL
+);
+
+
+ALTER TABLE public.washing_machines OWNER TO red_user;
+
+--
+-- Name: washing_machines_id_seq; Type: SEQUENCE; Schema: public; Owner: red_user
+--
+
+CREATE SEQUENCE public.washing_machines_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE public.washing_machines_id_seq OWNER TO red_user;
+
+--
+-- Name: washing_machines_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: red_user
+--
+
+ALTER SEQUENCE public.washing_machines_id_seq OWNED BY public.washing_machines.id;
+
+
+--
 -- Name: Category id; Type: DEFAULT; Schema: public; Owner: red_user
 --
 
@@ -364,13 +540,6 @@ ALTER TABLE ONLY public."Product" ALTER COLUMN id SET DEFAULT nextval('public."P
 
 
 --
--- Name: Sale id; Type: DEFAULT; Schema: public; Owner: red_user
---
-
-ALTER TABLE ONLY public."Sale" ALTER COLUMN id SET DEFAULT nextval('public."Sale_id_seq"'::regclass);
-
-
---
 -- Name: SaleItem id; Type: DEFAULT; Schema: public; Owner: red_user
 --
 
@@ -385,6 +554,34 @@ ALTER TABLE ONLY public.clients ALTER COLUMN id SET DEFAULT nextval('public.clie
 
 
 --
+-- Name: credit_installments id; Type: DEFAULT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.credit_installments ALTER COLUMN id SET DEFAULT nextval('public.credit_installments_id_seq'::regclass);
+
+
+--
+-- Name: payments id; Type: DEFAULT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.payments ALTER COLUMN id SET DEFAULT nextval('public.payments_id_seq'::regclass);
+
+
+--
+-- Name: rentals id; Type: DEFAULT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.rentals ALTER COLUMN id SET DEFAULT nextval('public.rentals_id_seq'::regclass);
+
+
+--
+-- Name: sales id; Type: DEFAULT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.sales ALTER COLUMN id SET DEFAULT nextval('public.sales_id_seq'::regclass);
+
+
+--
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: red_user
 --
 
@@ -392,13 +589,22 @@ ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_
 
 
 --
+-- Name: washing_machines id; Type: DEFAULT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.washing_machines ALTER COLUMN id SET DEFAULT nextval('public.washing_machines_id_seq'::regclass);
+
+
+--
 -- Data for Name: Category; Type: TABLE DATA; Schema: public; Owner: red_user
 --
 
 COPY public."Category" (id, nombre) FROM stdin;
-1	Cacharrería General
-4	Barillas
-2	Cementos
+1	Cacharrería
+6	Electrodomésticos
+7	Hogar
+8	Limpieza
+9	Otros
 \.
 
 
@@ -407,10 +613,10 @@ COPY public."Category" (id, nombre) FROM stdin;
 --
 
 COPY public."GasType" (id, nombre, stock_llenos, stock_vacios, precio_venta, precio_envase) FROM stdin;
-2	Cilindo 100lb	7	2	320000.00	400000.00
-1	Cilindro 10lb	7	8	45000.00	120000.00
-3	Cilindro 40lb	9	2	150000.00	250000.00
-6	Cilindro 100lb	8	2	320000.00	400000.00
+4	Balón 5lb	3	29	8000.00	12000.00
+5	Cilindro 20lb	148	31	25000.00	40000.00
+6	Cilindro 40lb	98	20	45000.00	60000.00
+1	Cilindro 10lb	198	50	15000.00	25000.00
 \.
 
 
@@ -419,70 +625,11 @@ COPY public."GasType" (id, nombre, stock_llenos, stock_vacios, precio_venta, pre
 --
 
 COPY public."Product" (id, nombre, codigo_barras, precio_venta, costo, stock, stock_minimo, "categoryId") FROM stdin;
-6	Trapeador	770000000004	14000.00	9000.00	15	3	1
-1	Cemento blanco	7000001	35000.00	30000.00	48	5	4
-10	Tornillos driwal	770000003	100.00	50.00	1	5	1
-21	Pintura Blanca 1G	770100000100	25000.00	15000.00	30	5	1
-24	Silicona Selladora	770100000103	18000.00	10000.00	25	3	1
-27	Barilla 1/2 Pulgada	880100000201	8000.00	5000.00	150	30	2
-41	Linterna LED Recargable	770100000107	25000.00	15000.00	40	5	1
-43	Cinta Métrica 5m	770100000109	10000.00	6000.00	60	10	1
-45	Varilla Corrugada 1/4	880100000204	4000.00	2500.00	300	60	4
-39	Taladro Percutor 500W	770100000105	150000.00	95000.00	9	2	1
-2	Barilla de 2pulgadas	7000002	15000.00	10000.00	98	5	1
-5	Escoba	770000000003	12000.00	8000.00	19	3	2
-47	Mortero Seco 25kg	990100000302	18000.00	11000.00	44	5	1
-3	Detergente 1L	770000000001	8500.00	6000.00	28	5	1
-26	Barilla 3/8 Pulgada	880100000200	5000.00	3000.00	199	50	2
-7	Ambientador	770000000005	7000.00	4500.00	39	5	1
-22	Brocha de 4 pulgadas	770100000101	8000.00	4500.00	47	10	1
-40	Sierra Caladora	770100000106	120000.00	75000.00	2	2	1
-46	Grapa para Malla	880100000205	1000.00	500.00	499	100	2
-8	Limpieza	770000000006	7000.00	4500.00	39	5	1
-44	Malla Electrosoldada	880100000203	45000.00	30000.00	14	3	2
-48	Aditivo Impermeabilizante	990100000303	30000.00	18000.00	19	3	1
-4	Jabón en barra	770000000002	2500.00	1500.00	97	10	1
-28	Alambre de Amarre	880100000202	15000.00	9000.00	99	20	2
-42	Destornillador Phillips	770100000108	5000.00	2500.00	79	15	1
-25	Candado de Alta Seguridad	770100000104	35000.00	20000.00	13	2	1
-23	Guantes de Seguridad	770100000102	12000.00	7000.00	44	5	1
-\.
-
-
---
--- Data for Name: Sale; Type: TABLE DATA; Schema: public; Owner: red_user
---
-
-COPY public."Sale" (id, fecha, total, metodo_pago, "userId", "clientId") FROM stdin;
-1	2025-11-23 17:33:19.193	45000.00	Efectivo	1	\N
-2	2025-11-23 17:42:33.384	115000.00	Efectivo	1	\N
-3	2025-11-23 17:43:25.689	720000.00	Efectivo	1	\N
-4	2025-11-23 17:43:48.697	400000.00	Efectivo	1	\N
-5	2025-11-23 17:45:16.737	135000.00	Efectivo	1	\N
-6	2025-11-23 17:45:47.739	640000.00	Efectivo	1	\N
-7	2025-11-23 17:46:12.41	150000.00	Efectivo	1	\N
-8	2025-11-23 19:21:26.658	60000.00	Efectivo	1	2
-9	2025-11-23 19:33:13.939	47500.00	Transferencia	1	1
-10	2025-11-23 20:59:52.542	500.00	Efectivo	1	1
-11	2025-11-23 21:36:43.766	210000.00	Transferencia	1	1
-12	2025-11-23 21:59:14.9	35000.00	Efectivo	1	1
-13	2025-11-23 22:00:05.345	12000.00	Efectivo	1	1
-14	2025-11-23 22:01:34.255	8500.00	Efectivo	1	1
-15	2025-11-23 22:03:07.42	18000.00	Efectivo	1	1
-16	2025-11-23 22:42:54.946	8500.00	Efectivo	1	1
-17	2025-11-23 22:46:07.107	13000.00	Efectivo	1	2
-18	2025-11-23 22:46:45.49	7000.00	Efectivo	1	2
-19	2025-11-23 22:51:25.957	8000.00	Efectivo	1	1
-20	2025-11-23 22:56:26.65	8000.00	Efectivo	1	1
-21	2025-11-23 23:14:58.254	800000.00	Transferencia	1	1
-22	2025-11-23 23:15:53.458	390000.00	Transferencia	1	1
-26	2025-11-23 21:36:23.033	45000.00	Transferencia	1	1
-23	2025-11-23 02:27:00.01	321000.00	Efectivo	2	1
-24	2025-11-23 02:29:23.496	7000.00	Efectivo	1	1
-25	2025-11-23 02:33:53.438	2500.00	Transferencia	1	1
-27	2025-11-23 21:49:47.147	30000.00	Transferencia	1	1
-28	2025-11-24 03:00:42.472	2500.00	Transferencia	1	1
-29	2025-11-24 03:03:02.587	67000.00	Transferencia	2	2
+1	Olla de Aluminio 2L	001	25000.00	15000.00	8	5	1
+5	Plato Hondo Cerámica	005	12000.00	7000.00	9	6	1
+6	Taza Cerámica 300ml	004	8500.00	4500.00	16	10	1
+3	Juego de Cucharas Acero	003	18000.00	10000.00	13	8	1
+2	Sartén Antiadherente 24cm	002	35000.00	20000.00	6	3	1
 \.
 
 
@@ -490,56 +637,24 @@ COPY public."Sale" (id, fecha, total, metodo_pago, "userId", "clientId") FROM st
 -- Data for Name: SaleItem; Type: TABLE DATA; Schema: public; Owner: red_user
 --
 
-COPY public."SaleItem" (id, "saleId", "productId", "gasTypeId", cantidad, precio_unit, subtotal, recibio_envase) FROM stdin;
-1	1	\N	1	1	45000.00	45000.00	t
-2	2	1	\N	2	35000.00	70000.00	f
-3	2	\N	1	1	45000.00	45000.00	t
-4	3	\N	2	1	720000.00	720000.00	f
-5	4	\N	3	1	400000.00	400000.00	f
-6	5	\N	1	3	45000.00	135000.00	t
-7	6	\N	2	2	320000.00	640000.00	t
-8	7	\N	3	1	150000.00	150000.00	t
-9	8	2	\N	1	15000.00	15000.00	f
-10	8	\N	1	1	45000.00	45000.00	t
-11	9	4	\N	1	2500.00	2500.00	f
-12	9	\N	1	1	45000.00	45000.00	t
-13	10	10	\N	5	100.00	500.00	f
-14	11	39	\N	1	150000.00	150000.00	f
-15	11	\N	1	1	45000.00	45000.00	t
-16	11	2	\N	1	15000.00	15000.00	f
-17	12	25	\N	1	35000.00	35000.00	f
-18	13	5	\N	1	12000.00	12000.00	f
-19	14	3	\N	1	8500.00	8500.00	f
-20	15	47	\N	1	18000.00	18000.00	f
-21	16	3	\N	1	8500.00	8500.00	f
-22	17	22	\N	1	8000.00	8000.00	f
-23	17	26	\N	1	5000.00	5000.00	f
-24	18	7	\N	1	7000.00	7000.00	f
-25	19	22	\N	1	8000.00	8000.00	f
-26	20	22	\N	1	8000.00	8000.00	f
-27	21	40	\N	4	120000.00	480000.00	f
-28	21	\N	6	1	320000.00	320000.00	t
-29	22	40	\N	2	120000.00	240000.00	f
-30	22	\N	3	1	150000.00	150000.00	t
-31	23	46	\N	1	1000.00	1000.00	f
-32	23	\N	6	1	320000.00	320000.00	t
-33	24	8	\N	1	7000.00	7000.00	f
-34	25	4	\N	1	2500.00	2500.00	f
-35	26	44	\N	1	45000.00	45000.00	f
-36	27	48	\N	1	30000.00	30000.00	f
-37	28	4	\N	1	2500.00	2500.00	f
-38	29	28	\N	1	15000.00	15000.00	f
-39	29	42	\N	1	5000.00	5000.00	f
-40	29	25	\N	1	35000.00	35000.00	f
-41	29	23	\N	1	12000.00	12000.00	f
-\.
-
-
---
--- Data for Name: _prisma_migrations; Type: TABLE DATA; Schema: public; Owner: red_user
---
-
-COPY public._prisma_migrations (id, checksum, finished_at, migration_name, logs, rolled_back_at, started_at, applied_steps_count) FROM stdin;
+COPY public."SaleItem" (id, "saleId", "productId", "gasTypeId", cantidad, precio_unit, subtotal, recibio_envase, "taxAmount", "taxRateApplied") FROM stdin;
+1	1	1	\N	1	25000.00	25000.00	f	0.00	0.0000
+2	1	\N	4	21	8000.00	168000.00	t	0.00	0.0000
+3	2	\N	1	1	40000.00	40000.00	f	0.00	0.0000
+4	3	5	\N	1	12000.00	12000.00	f	0.00	0.0000
+5	4	\N	5	1	25000.00	25000.00	t	0.00	0.0000
+6	4	\N	4	1	20000.00	20000.00	f	0.00	0.0000
+7	5	1	\N	1	25000.00	25000.00	f	0.00	0.0000
+8	6	5	\N	1	12000.00	12000.00	f	0.00	0.0000
+9	6	\N	5	1	65000.00	65000.00	f	0.00	0.0000
+10	7	\N	6	1	105000.00	105000.00	f	0.00	0.0000
+11	8	5	\N	1	12000.00	12000.00	f	0.00	0.0000
+12	9	6	\N	4	8500.00	34000.00	f	0.00	0.0000
+13	10	3	\N	2	18000.00	36000.00	f	0.00	0.0000
+14	11	2	\N	1	35000.00	35000.00	f	0.00	0.0000
+15	12	\N	6	1	105000.00	105000.00	f	0.00	0.0000
+16	13	\N	1	1	40000.00	40000.00	f	0.00	0.0000
+17	14	2	\N	1	35000.00	35000.00	f	0.00	0.0000
 \.
 
 
@@ -548,8 +663,7 @@ COPY public._prisma_migrations (id, checksum, finished_at, migration_name, logs,
 --
 
 COPY public.clients (id, nombre, identificacion, telefono, direccion, created_at, updated_at) FROM stdin;
-1	Cliente Genérico	999999999	5555555	Quibdó - Chocó	2025-11-23 18:45:32.548	2025-11-23 18:55:28.61
-2	Duvan Mateo Asprilla Huurtado	10798093451	7777777	Cra 11 # 146 - 36 barrio buenos aires	2025-11-23 18:56:27.136	2025-11-24 02:26:14.563
+1	Cliente Genérico	N/A	3124943527	N/A	2025-11-26 20:07:33.126	2025-11-28 04:59:05.316
 \.
 
 
@@ -558,7 +672,98 @@ COPY public.clients (id, nombre, identificacion, telefono, direccion, created_at
 --
 
 COPY public.companies (id, name, tax_id, address, phone, email, logo_url, created_at, updated_at) FROM stdin;
-1	Jojama	80772379-1	Cra 11 # 146 - 36 Barrio buenos aires Quibdó - Chocó	0000000000	empresa@ejemplo.com	/uploads/logos/logo-1763937625750-846003767.jpg	2025-11-23 22:18:11.101	2025-11-23 22:41:32.867
+1	Cacharrería Gas POS	123456789-0	Calle Principal #123	+593 2 123 4567	info@cacharreriagas.com	/uploads/logos/logo-1764190134281-27730172.jpg	2025-11-26 20:07:33.215	2025-11-26 20:48:55.903
+\.
+
+
+--
+-- Data for Name: credit_installments; Type: TABLE DATA; Schema: public; Owner: red_user
+--
+
+COPY public.credit_installments (id, "saleId", "installmentNumber", "amountDue", "dueDate", status, "paidAt", created_at, updated_at) FROM stdin;
+4	11	1	17500.00	2025-11-27 00:08:39.658	PAID	2025-11-27 01:25:20.113	2025-11-27 00:08:52.246	2025-11-27 01:25:20.114
+1	10	1	12000.00	2025-11-26 23:58:09.852	PAID	2025-11-27 01:47:35.564	2025-11-26 23:58:24.715	2025-11-27 01:47:35.566
+3	10	3	12000.00	2026-01-25 23:58:09.852	PAID	2025-11-27 03:38:50.329	2025-11-26 23:58:24.715	2025-11-27 03:38:50.331
+2	10	2	12000.00	2025-12-26 23:58:09.852	PAID	2025-11-27 03:38:50.329	2025-11-26 23:58:24.715	2025-11-27 03:38:50.331
+5	11	2	17500.00	2025-12-27 00:08:39.658	PAID	2025-11-27 03:41:58.006	2025-11-27 00:08:52.246	2025-11-27 03:41:58.007
+7	13	2	20000.00	2025-12-28 00:00:00	PENDING	\N	2025-11-27 14:14:08.171	2025-11-27 14:14:08.171
+6	13	1	20000.00	2025-11-28 00:00:00	PAID	2025-11-28 05:00:12.79	2025-11-27 14:14:08.171	2025-11-28 14:12:55.743
+8	14	1	17500.00	2025-11-28 01:58:24.639	PENDING	\N	2025-11-28 01:58:37.984	2025-11-28 01:58:37.984
+9	14	2	17500.00	2025-12-28 01:58:24.639	PENDING	\N	2025-11-28 01:58:37.984	2025-11-28 01:58:37.984
+\.
+
+
+--
+-- Data for Name: payments; Type: TABLE DATA; Schema: public; Owner: red_user
+--
+
+COPY public.payments (id, "saleId", amount, "paymentMethod", date, created_at) FROM stdin;
+1	1	100000.00	CASH	2025-11-26 20:37:19.011	2025-11-26 20:37:19.013
+2	1	93000.00	TRANSFER	2025-11-26 20:37:19.011	2025-11-26 20:37:19.013
+3	2	40000.00	CREDIT_CARD	2025-11-26 20:55:41.642	2025-11-26 20:55:41.643
+4	3	50000.00	CASH	2025-11-26 21:01:30.049	2025-11-26 21:01:30.052
+5	4	50000.00	CASH	2025-11-26 21:56:17.4	2025-11-26 21:56:17.401
+6	5	25000.00	CREDIT	2025-11-26 22:55:08.887	2025-11-26 22:55:08.889
+7	5	0.00	CASH	2025-11-26 22:55:08.887	2025-11-26 22:55:08.889
+8	6	77000.00	CREDIT	2025-11-26 23:19:22.662	2025-11-26 23:19:22.663
+9	6	0.00	CASH	2025-11-26 23:19:22.662	2025-11-26 23:19:22.663
+10	7	105000.00	CREDIT	2025-11-26 23:21:37.015	2025-11-26 23:21:37.016
+11	7	0.00	CASH	2025-11-26 23:21:37.015	2025-11-26 23:21:37.016
+12	8	12000.00	CREDIT	2025-11-26 23:28:33.314	2025-11-26 23:28:33.315
+13	8	0.00	CASH	2025-11-26 23:28:33.314	2025-11-26 23:28:33.315
+14	9	34000.00	CREDIT	2025-11-26 23:42:55.197	2025-11-26 23:42:55.199
+15	9	0.00	CASH	2025-11-26 23:42:55.197	2025-11-26 23:42:55.199
+16	10	36000.00	CREDIT	2025-11-26 23:58:24.71	2025-11-26 23:58:24.712
+17	10	0.00	CASH	2025-11-26 23:58:24.711	2025-11-26 23:58:24.712
+18	11	35000.00	CREDIT	2025-11-27 00:08:52.238	2025-11-27 00:08:52.24
+19	11	0.00	CASH	2025-11-27 00:08:52.238	2025-11-27 00:08:52.24
+20	11	17500.00	CASH	2025-11-27 01:25:20.095	2025-11-27 01:25:20.097
+21	10	12000.00	CASH	2025-11-27 01:47:35.559	2025-11-27 01:47:35.561
+23	10	12000.00	CASH	2025-11-27 03:38:50.309	2025-11-27 03:38:50.311
+22	10	12000.00	CASH	2025-11-27 03:38:50.311	2025-11-27 03:38:50.313
+24	11	17500.00	TRANSFER	2025-11-27 03:41:58.005	2025-11-27 03:41:58.006
+57	12	3000.00	CASH	2025-11-27 13:56:51.419	2025-11-27 13:56:51.421
+58	12	102000.00	CASH	2025-11-27 13:56:51.419	2025-11-27 13:56:51.421
+59	13	40000.00	CREDIT	2025-11-27 14:14:08.167	2025-11-27 14:14:08.169
+60	13	0.00	CASH	2025-11-27 14:14:08.167	2025-11-27 14:14:08.169
+61	13	20000.00	CASH	2025-11-28 05:00:12.781	2025-11-28 14:12:55.733
+62	14	35000.00	CREDIT	2025-11-28 01:58:37.975	2025-11-28 01:58:37.976
+63	14	0.00	CASH	2025-11-28 01:58:37.975	2025-11-28 01:58:37.976
+\.
+
+
+--
+-- Data for Name: rentals; Type: TABLE DATA; Schema: public; Owner: red_user
+--
+
+COPY public.rentals (id, "washingMachineId", "clientId", "rentalPrice", rental_date, scheduled_return_date, actual_return_date, status, "userId", "hoursRented", notes, created_at, updated_at) FROM stdin;
+1	3	1	18000.00	2025-11-26 21:00:07.127	2025-11-27 01:00:05.056	2025-11-27 00:54:26.585	DELIVERED	1	4	Recargo adicional: $13500	2025-11-26 21:00:07.128	2025-11-27 00:54:26.587
+3	2	1	24000.00	2025-11-27 13:40:19.623	2025-11-27 16:40:18.607	2025-11-27 17:09:56.622	DELIVERED	1	3	\N	2025-11-27 13:40:19.625	2025-11-27 17:09:56.627
+2	1	1	11000.00	2025-11-27 13:39:26.067	2025-11-27 15:39:23.192	2025-11-27 17:10:05.118	DELIVERED	1	2	\N	2025-11-27 13:39:26.069	2025-11-27 17:10:05.124
+4	2	1	32000.00	2025-11-27 13:40:26.423	2025-11-27 17:40:25.126	2025-11-27 18:13:25.015	DELIVERED	1	4	Recargo adicional: $16000	2025-11-27 13:40:26.424	2025-11-27 18:13:25.017
+5	3	1	18000.00	2025-11-27 13:41:16.768	2025-11-27 17:41:11.285	2025-11-27 18:14:03.627	DELIVERED	1	4	Recargo adicional: $9000	2025-11-27 13:41:16.77	2025-11-27 18:14:03.629
+\.
+
+
+--
+-- Data for Name: sales; Type: TABLE DATA; Schema: public; Owner: red_user
+--
+
+COPY public.sales (id, total, "paymentStatus", "totalPaid", "clientId", "userId", created_at, updated_at) FROM stdin;
+1	193000.00	PAID	193000.00	1	1	2025-11-26 20:37:18.999	2025-11-26 20:37:18.999
+2	40000.00	PAID	40000.00	1	1	2025-11-26 20:55:41.633	2025-11-26 20:55:41.633
+3	12000.00	PAID	50000.00	1	1	2025-11-26 21:01:30.045	2025-11-26 21:01:30.045
+4	45000.00	PAID	50000.00	1	1	2025-11-26 21:56:17.387	2025-11-26 21:56:17.387
+5	25000.00	PAID	25000.00	1	1	2025-11-26 22:55:08.877	2025-11-26 22:55:08.877
+6	77000.00	PAID	77000.00	1	1	2025-11-26 23:19:22.656	2025-11-26 23:19:22.656
+7	105000.00	PAID	105000.00	1	1	2025-11-26 23:21:37.008	2025-11-26 23:21:37.008
+8	12000.00	PAID	12000.00	1	1	2025-11-26 23:28:33.302	2025-11-26 23:28:33.302
+9	34000.00	PAID	34000.00	1	1	2025-11-26 23:42:55.19	2025-11-26 23:42:55.19
+10	36000.00	PENDING	0.00	1	1	2025-11-26 23:58:24.703	2025-11-26 23:58:24.703
+11	35000.00	PAID	0.00	1	1	2025-11-27 00:08:52.231	2025-11-27 03:41:58.009
+12	105000.00	PAID	105000.00	1	1	2025-11-27 13:56:51.403	2025-11-27 13:56:51.403
+13	40000.00	PENDING	0.00	1	1	2025-11-27 14:14:08.161	2025-11-27 14:14:08.161
+14	35000.00	PENDING	0.00	1	1	2025-11-28 01:58:37.943	2025-11-28 01:58:37.943
 \.
 
 
@@ -567,8 +772,19 @@ COPY public.companies (id, name, tax_id, address, phone, email, logo_url, create
 --
 
 COPY public.users (id, nombre, username, password, role, created_at, updated_at) FROM stdin;
-1	Administrador	admin	$2a$10$0jm7Asywux5V6S.Elq6wquE8RdY7sQylhdx.6NiHpjtZHaULCf1YW	ADMIN	2025-11-23 17:19:27.762	2025-11-23 17:49:57.632
-2	Haminton Jair Mena	jair	$2a$10$tk6NMoLBt6jtC8qVMDefUeBNl7ZwX.G5rCPI1JVzOWRpmcgf4lqFG	VENDEDOR	2025-11-23 17:50:07.139	2025-11-23 17:50:07.139
+1	Administrador	admin	$2a$10$BfYR9FdLQp1Zb8hLa8M94.di405oS80nSE/wwG.fkcHBJ6tzioSHq	ADMIN	2025-11-26 20:07:33.031	2025-11-26 20:07:33.031
+2	Vendedor Default	vendedor	$2a$10$Q2qoZSbWMMGkNcNW0A/du.AwNf/94JGFk5vRVbtFFCKB7WmXjCdmG	VENDEDOR	2025-11-26 20:07:33.118	2025-11-26 20:07:33.118
+\.
+
+
+--
+-- Data for Name: washing_machines; Type: TABLE DATA; Schema: public; Owner: red_user
+--
+
+COPY public.washing_machines (id, description, "pricePerHour", "initialQuantity", "availableQuantity", created_at, updated_at) FROM stdin;
+1	Lavadora Samsung 8kg	5500.00	3	3	2025-11-26 20:07:33.203	2025-11-27 17:10:05.126
+2	Lavadora LG 10kg	8000.00	2	2	2025-11-26 20:07:33.207	2025-11-27 18:13:25.025
+3	Lavadora Whirlpool 7kg	4500.00	2	2	2025-11-26 20:07:33.21	2025-11-27 18:14:03.633
 \.
 
 
@@ -576,7 +792,7 @@ COPY public.users (id, nombre, username, password, role, created_at, updated_at)
 -- Name: Category_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
 --
 
-SELECT pg_catalog.setval('public."Category_id_seq"', 4, true);
+SELECT pg_catalog.setval('public."Category_id_seq"', 9, true);
 
 
 --
@@ -590,28 +806,49 @@ SELECT pg_catalog.setval('public."GasType_id_seq"', 6, true);
 -- Name: Product_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
 --
 
-SELECT pg_catalog.setval('public."Product_id_seq"', 48, true);
+SELECT pg_catalog.setval('public."Product_id_seq"', 6, true);
 
 
 --
 -- Name: SaleItem_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
 --
 
-SELECT pg_catalog.setval('public."SaleItem_id_seq"', 41, true);
-
-
---
--- Name: Sale_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
---
-
-SELECT pg_catalog.setval('public."Sale_id_seq"', 29, true);
+SELECT pg_catalog.setval('public."SaleItem_id_seq"', 17, true);
 
 
 --
 -- Name: clients_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
 --
 
-SELECT pg_catalog.setval('public.clients_id_seq', 4, true);
+SELECT pg_catalog.setval('public.clients_id_seq', 1, true);
+
+
+--
+-- Name: credit_installments_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
+--
+
+SELECT pg_catalog.setval('public.credit_installments_id_seq', 9, true);
+
+
+--
+-- Name: payments_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
+--
+
+SELECT pg_catalog.setval('public.payments_id_seq', 63, true);
+
+
+--
+-- Name: rentals_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
+--
+
+SELECT pg_catalog.setval('public.rentals_id_seq', 5, true);
+
+
+--
+-- Name: sales_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
+--
+
+SELECT pg_catalog.setval('public.sales_id_seq', 14, true);
 
 
 --
@@ -619,6 +856,13 @@ SELECT pg_catalog.setval('public.clients_id_seq', 4, true);
 --
 
 SELECT pg_catalog.setval('public.users_id_seq', 2, true);
+
+
+--
+-- Name: washing_machines_id_seq; Type: SEQUENCE SET; Schema: public; Owner: red_user
+--
+
+SELECT pg_catalog.setval('public.washing_machines_id_seq', 3, true);
 
 
 --
@@ -654,22 +898,6 @@ ALTER TABLE ONLY public."SaleItem"
 
 
 --
--- Name: Sale Sale_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
---
-
-ALTER TABLE ONLY public."Sale"
-    ADD CONSTRAINT "Sale_pkey" PRIMARY KEY (id);
-
-
---
--- Name: _prisma_migrations _prisma_migrations_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
---
-
-ALTER TABLE ONLY public._prisma_migrations
-    ADD CONSTRAINT _prisma_migrations_pkey PRIMARY KEY (id);
-
-
---
 -- Name: clients clients_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
 --
 
@@ -686,11 +914,51 @@ ALTER TABLE ONLY public.companies
 
 
 --
+-- Name: credit_installments credit_installments_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.credit_installments
+    ADD CONSTRAINT credit_installments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: payments payments_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT payments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: rentals rentals_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.rentals
+    ADD CONSTRAINT rentals_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: sales sales_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.sales
+    ADD CONSTRAINT sales_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
 --
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: washing_machines washing_machines_pkey; Type: CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.washing_machines
+    ADD CONSTRAINT washing_machines_pkey PRIMARY KEY (id);
 
 
 --
@@ -757,23 +1025,63 @@ ALTER TABLE ONLY public."SaleItem"
 --
 
 ALTER TABLE ONLY public."SaleItem"
-    ADD CONSTRAINT "SaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES public."Sale"(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT "SaleItem_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES public.sales(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
--- Name: Sale Sale_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+-- Name: credit_installments credit_installments_saleId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
 --
 
-ALTER TABLE ONLY public."Sale"
-    ADD CONSTRAINT "Sale_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public.clients(id) ON UPDATE CASCADE ON DELETE SET NULL;
+ALTER TABLE ONLY public.credit_installments
+    ADD CONSTRAINT "credit_installments_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES public.sales(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
--- Name: Sale Sale_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+-- Name: payments payments_saleId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
 --
 
-ALTER TABLE ONLY public."Sale"
-    ADD CONSTRAINT "Sale_userId_fkey" FOREIGN KEY ("userId") REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+ALTER TABLE ONLY public.payments
+    ADD CONSTRAINT "payments_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES public.sales(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: rentals rentals_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.rentals
+    ADD CONSTRAINT "rentals_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public.clients(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: rentals rentals_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.rentals
+    ADD CONSTRAINT "rentals_userId_fkey" FOREIGN KEY ("userId") REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: rentals rentals_washingMachineId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.rentals
+    ADD CONSTRAINT "rentals_washingMachineId_fkey" FOREIGN KEY ("washingMachineId") REFERENCES public.washing_machines(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: sales sales_clientId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.sales
+    ADD CONSTRAINT "sales_clientId_fkey" FOREIGN KEY ("clientId") REFERENCES public.clients(id) ON UPDATE CASCADE ON DELETE RESTRICT;
+
+
+--
+-- Name: sales sales_userId_fkey; Type: FK CONSTRAINT; Schema: public; Owner: red_user
+--
+
+ALTER TABLE ONLY public.sales
+    ADD CONSTRAINT "sales_userId_fkey" FOREIGN KEY ("userId") REFERENCES public.users(id) ON UPDATE CASCADE ON DELETE RESTRICT;
 
 
 --
@@ -781,13 +1089,6 @@ ALTER TABLE ONLY public."Sale"
 --
 
 REVOKE USAGE ON SCHEMA public FROM PUBLIC;
-
-
---
--- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: postgres
---
-
-ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT SELECT ON TABLES TO red_user;
 
 
 --

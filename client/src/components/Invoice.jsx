@@ -26,6 +26,127 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
     window.print()
   }
 
+  // Calcular totales de IVA - usando valores del servidor si están disponibles
+// Calcular totales de IVA - cálculo independiente por producto
+const calculateTotals = () => {
+  // 🔥 Si el servidor envió los valores, usarlos directamente (son más precisos)
+  if (sale.subtotalNeto !== undefined && sale.ivaTotal !== undefined) {
+    return {
+      subtotalSinIVA: Number(sale.subtotalNeto),
+      totalIVA: Number(sale.ivaTotal),
+      totalConIVA: Number(sale.subtotalNeto) + Number(sale.ivaTotal),
+      // 🔥 NUEVO: Desglose de IVA por producto
+      ivaPorProducto: sale.items?.map(item => {
+        const precioUnit = Number(item.precio_unit) || 0
+        const cantidad = Number(item.cantidad) || 0
+        const taxRate = Number(item.taxRateApplied) || 0
+        
+        // 🔥 CÁLCULO INDEPENDIENTE DE IVA POR PRODUCTO
+        const ivaUnitario = precioUnit * taxRate
+        const ivaTotalProducto = ivaUnitario * cantidad
+        const subtotalNetoProducto = precioUnit * cantidad - ivaTotalProducto
+        
+        return {
+          nombre: item.product?.nombre || item.gasType?.nombre || 'Producto',
+          precioUnit,
+          cantidad,
+          taxRate,
+          ivaUnitario,
+          ivaTotalProducto,
+          subtotalNetoProducto,
+          totalProducto: precioUnit * cantidad
+        }
+      }) || []
+    }
+  }
+
+  // Fallback: calcular localmente con desglose por producto
+  let subtotalSinIVA = 0
+  let totalIVA = 0
+  let ivaPorProducto = []
+
+  sale.items?.forEach(item => {
+    const precioUnit = Number(item.precio_unit) || 0
+    const cantidad = Number(item.cantidad) || 0
+    const taxRate = Number(item.taxRateApplied) || 0
+    
+    // 🔥 CÁLCULO INDEPENDIENTE DE IVA POR PRODUCTO
+    const ivaUnitario = precioUnit * taxRate
+    const ivaTotalProducto = ivaUnitario * cantidad
+    const subtotalNetoProducto = precioUnit * cantidad - ivaTotalProducto
+    
+    // Acumular totales
+    subtotalSinIVA += subtotalNetoProducto
+    totalIVA += ivaTotalProducto
+    
+    // Guardar desglose de este producto
+    ivaPorProducto.push({
+      nombre: item.product?.nombre || item.gasType?.nombre || 'Producto',
+      precioUnit,
+      cantidad,
+      taxRate,
+      ivaUnitario,
+      ivaTotalProducto,
+      subtotalNetoProducto,
+      totalProducto: precioUnit * cantidad
+    })
+  })
+
+  const totalConIVA = subtotalSinIVA + totalIVA
+
+  return { 
+    subtotalSinIVA, 
+    totalIVA, 
+    totalConIVA,
+    ivaPorProducto
+  }
+}
+
+  const { subtotalSinIVA, totalIVA, totalConIVA } = calculateTotals()
+
+  // Calcular información de crédito - usando valores del servidor si están disponibles
+  const getCreditInfo = () => {
+    const creditPayment = sale.payments?.find(p => p.paymentMethod === 'CREDIT')
+    if (!creditPayment) return null
+
+    // 🔥 CORRECCIÓN: El saldo pendiente es el monto total que se financia a crédito
+    // = Total de la venta - Pagos en efectivo/tarjeta/transferencia
+    const cashPayments = sale.payments?.filter(p => p.paymentMethod !== 'CREDIT') || []
+    const totalCash = cashPayments.reduce((sum, p) => sum + Number(p.amount), 0)
+    
+    // El saldo pendiente es lo que se financia (incluye IVA)
+    // Se calcula como: Total de la venta - Pagos en efectivo
+    const pendingBalance = Number(sale.total) - totalCash
+    
+    // 🔥 Usar creditInterestAmount del servidor
+    // Este es el interés capturado, NO es lo que hay que recalcular
+    const interestAmount = Number(sale.creditInterestAmount || 0)
+    
+    // El total crédito es lo que se envía como amount en el payment CREDIT
+    // O se puede calcular como: saldo pendiente + interés
+    const totalCredit = pendingBalance + interestAmount
+    
+    console.log("🔍 DESGLOSE DE CRÉDITO EN INVOICE:", {
+      pendingBalance: pendingBalance.toFixed(2),
+      interestAmount: interestAmount.toFixed(2),
+      interestType: sale.creditInterestType,
+      totalCredit: totalCredit.toFixed(2),
+      installments: sale.creditInstallments?.length,
+      payments: sale.payments?.map(p => ({ method: p.paymentMethod, amount: p.amount }))
+    })
+
+    return {
+      pendingBalance,
+      interestAmount,
+      interestType: sale.creditInterestType, // PORCENTAJE o VALOR
+      totalCredit,
+      installments: sale.creditInstallments || []
+    }
+  }
+
+  const creditInfo = getCreditInfo()
+
+  console.log("🔍 DESGLOSE DE CRÉDITO EN INVOICE:", creditInfo)
   return (
     <div className="max-w-2xl mx-auto bg-white" id="invoice-print">
       {/* Header */}
@@ -48,150 +169,165 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
             </div>
           </div>
           <div className="text-right">
-            <div className="text-lg font-bold">FACTURA</div>
-            <div className="text-sm text-gray-600">No. #{String(sale.id).padStart(6, '0')}</div>
+            <div className="text-sm text-gray-600 mb-2">FACTURA</div>
+            <div className="text-lg font-bold">#{sale.id}</div>
+            <div className="text-sm text-gray-600 mt-2">
+              <div>Fecha: {formatDate(sale.createdAt)}</div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Sale Info */}
-      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
-        <div>
-          <div className="font-semibold">Fecha:</div>
-          <div>{formatDate(sale.fecha)}</div>
-        </div>
-        <div>
-          <div className="font-semibold">Método de Pago:</div>
-          <div>{sale.metodo_pago}</div>
-        </div>
-        {client && (
-          <div>
-            <div className="font-semibold">Cliente:</div>
-            <div>{client.nombre}</div>
-            {client.identificacion && <div className="text-xs text-gray-600">CI/RUC: {client.identificacion}</div>}
-          </div>
-        )}
-        <div>
-          <div className="font-semibold">Vendedor:</div>
-          <div>{sale.user?.nombre || 'N/A'}</div>
+      {/* Cliente */}
+      <div className="mb-4">
+        <div className="text-sm font-semibold text-gray-700 mb-1">CLIENTE:</div>
+        <div className="text-sm">
+          {client ? (
+            <>
+              <div className="font-medium">{client.nombre}</div>
+              {client.identificacion && <div className="text-gray-600">CI/RUC: {client.identificacion}</div>}
+              {client.direccion && <div className="text-gray-600">Dirección: {client.direccion}</div>}
+              {client.telefono && <div className="text-gray-600">Tel: {client.telefono}</div>}
+            </>
+          ) : (
+            <div className="text-gray-600">Cliente general</div>
+          )}
         </div>
       </div>
 
-          {/* Items Table */}
+      {/* Items */}
       <div className="mb-4">
         <table className="w-full text-sm">
-          <thead className="border-t border-b">
-            <tr>
+          <thead>
+            <tr className="border-b border-gray-300">
               <th className="text-left py-2">Producto</th>
               <th className="text-center py-2">Cant.</th>
               <th className="text-right py-2">P. Unit.</th>
+              <th className="text-right py-2">IVA</th>
               <th className="text-right py-2">Subtotal</th>
             </tr>
           </thead>
           <tbody>
             {sale.items?.map((item, index) => (
-              <tr key={index} className="border-b">
+              <tr key={index} className="border-b border-gray-200">
                 <td className="py-2">
-                  <div className="font-medium">{item.product?.nombre || item.gasType?.nombre}</div>
-                  {item.gasType && (
-                    <div className="text-xs text-gray-600">
-                      {item.recibio_envase ? 'Con intercambio' : 'Sin intercambio'}
-                    </div>
+                  <div className="font-medium">
+                    {item.product?.nombre || item.gasType?.nombre || 'Producto'}
+                  </div>
+                  {item.recibio_envase && (
+                    <div className="text-xs text-green-600">Envase recibido</div>
                   )}
                 </td>
                 <td className="text-center py-2">{item.cantidad}</td>
                 <td className="text-right py-2">{formatCurrency(item.precio_unit)}</td>
-                <td className="text-right py-2 font-semibold">{formatCurrency(item.subtotal)}</td>
+                <td className="text-right py-2">
+                  {Number(item.taxRateApplied) > 0 
+                    ? `${(Number(item.taxRateApplied) * 100).toFixed(1)}%`
+                    : '0%'
+                  }
+                </td>
+                <td className="text-right py-2 font-medium">
+                  {formatCurrency(item.subtotal)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
 
-      {/* 🔥 NUEVO: Sección de Cuotas de Crédito */}
-      {sale.creditInstallments && sale.creditInstallments.length > 0 && (
-        <div className="mb-4 border-t pt-4">
-          <h4 className="font-bold text-sm mb-3 text-center bg-gray-100 py-2">
-            CUOTAS DE CRÉDITO
-          </h4>
-          <div className="space-y-1">
-            {sale.creditInstallments.map((installment, index) => (
-              <div key={index} className="flex justify-between text-xs py-1 border-b">
-                <span className="flex-1">
-                  Cuota {installment.installmentNumber} - 
-                  {new Date(installment.dueDate).toLocaleDateString('es-EC', {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit'
-                  })}
-                </span>
-                <span className="font-semibold text-right min-w-[80px]">
-                  {formatCurrency(installment.amountDue)}
-                </span>
+      {/* Totales */}
+      <div className="mb-4">
+        <div className="flex justify-end">
+          <div className="w-72">
+            {/* Desglose de IVA */}
+            <div className="bg-gray-50 p-3 rounded mb-2">
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-gray-700">Subtotal sin IVA:</span>
+                <span className="font-semibold">{formatCurrency(subtotalSinIVA)}</span>
               </div>
-            ))}
-          </div>
-          <div className="mt-2 pt-2 border-t flex justify-between font-bold text-sm">
-            <span>Total Crédito:</span>
-            <span>
-              {formatCurrency(
-                sale.creditInstallments.reduce((sum, installment) => 
-                  sum + Number(installment.amountDue), 0
-                )
-              )}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Totals */}
-      <div className="border-t-2 border-gray-900 pt-2">
-        <div className="flex justify-between text-lg font-bold">
-          <span>TOTAL:</span>
-          <span>{formatCurrency(sale.total)}</span>
-        </div>
+              <div className="flex justify-between py-2 text-sm">
+                <span className="text-gray-700">IVA Total:</span>
+                <span className="font-semibold text-orange-600">+{formatCurrency(totalIVA)}</span>
+              </div>
+              
+              <div className="flex justify-between py-3 border-t-2 border-gray-300 font-bold text-lg">
+                <span>TOTAL:</span>
+                <span className="text-green-700">{formatCurrency(totalConIVA)}</span>
+              </div>
+            </div>
+            
+            {/* Información de crédito */}
+            {creditInfo && (
+              <div className="bg-blue-50 p-3 rounded">
+                <div className="text-sm font-semibold text-blue-700 mb-3">DETALLE DE CRÉDITO:</div>
+                
+                {/* Saldo pendiente */}
+                <div className="flex justify-between py-1 text-sm">
+                  <span className="text-gray-700">Saldo pendiente:</span>
+                  <span className="font-semibold">{formatCurrency(creditInfo.pendingBalance)}</span>
+                </div>
+                
+                {/* Interés */}
+                {creditInfo.interestAmount > 0 && (
+                  <div className="flex justify-between py-1 text-sm">
+                    <span className="text-gray-700">
+                      {creditInfo.interestType === 'PORCENTAJE' 
+                        ? `Interés (${creditInfo.interestAmount}%):` 
+                        : 'Interés:'
+                      }
+                    </span>
+                    <span className="font-semibold text-orange-600">
+                      +{formatCurrency(creditInfo.interestAmount)}
+                    </span>
+                  </div>
+                )}
         
-        {sale.metodo_pago === 'Efectivo' && sale.amountReceived && (
-          <div className="mt-2 space-y-1 text-sm">
-            <div className="flex justify-between">
-              <span>Paga con:</span>
-              <span>{formatCurrency(sale.amountReceived)}</span>
-            </div>
-            <div className="flex justify-between font-semibold text-green-600">
-              <span>Cambio:</span>
-              <span>{formatCurrency(sale.amountReceived - sale.total)}</span>
-            </div>
+                {/* Total crédito */}
+                <div className="flex justify-between py-2 border-t border-blue-200 font-bold text-blue-700">
+                  <span>Total crédito:</span>
+                  <span>{formatCurrency(creditInfo.totalCredit)}</span>
+                </div>
+                
+                {/* Plan de pagos */}
+                {creditInfo.installments.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-blue-200">
+                    <div className="text-xs font-semibold text-blue-600 mb-2">Plan de pagos ({creditInfo.installments.length} cuotas):</div>
+                    <div className="space-y-1">
+                      {creditInfo.installments.map((installment, index) => (
+                        <div key={index} className="flex justify-between text-xs text-gray-600">
+                          <span>Cuota {installment.installmentNumber} ({formatDate(installment.dueDate)}):</span>
+                          <span className="font-semibold">{formatCurrency(installment.amountDue)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-        )}
+        </div>
+      </div>
+
+      {/* Pagos */}
+      <div className="mb-4">
+        <div className="text-sm font-semibold text-gray-700 mb-2">FORMA DE PAGO:</div>
+        <div className="text-sm space-y-1">
+          {sale.payments?.map((payment, index) => (
+            <div key={index} className="flex justify-between">
+              <span>{payment.paymentMethod === 'CASH' ? 'Efectivo' : payment.paymentMethod === 'CREDIT_CARD' ? 'Tarjeta' : payment.paymentMethod === 'TRANSFER' ? 'Transferencia' : 'Crédito'}:</span>
+              <span>{formatCurrency(payment.amount)}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Footer */}
-      <div className="mt-6 pt-4 border-t text-center text-xs text-gray-600">
-        <div>¡Gracias por su compra!</div>
-        <div className="mt-1">Este documento no tiene validez fiscal</div>
+      <div className="border-t border-gray-300 pt-4 mt-4 text-center text-xs text-gray-600">
+        <div>Gracias por su compra</div>
+        <div className="mt-1">Esta factura es un documento válido para fines fiscales</div>
       </div>
 
-      <style>{`
-        @media print {
-          .print\\:hidden {
-            display: none !important;
-          }
-          
-          #invoice-print {
-            margin: 0;
-            padding: 20px;
-            font-size: 12px;
-          }
-          
-          #invoice-print h1 {
-            font-size: 18px;
-          }
-          
-          #invoice-print table {
-            font-size: 10px;
-          }
-        }
-      `}</style>
+     
     </div>
   )
 }

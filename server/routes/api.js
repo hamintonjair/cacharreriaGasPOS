@@ -86,7 +86,6 @@ router.post("/auth/login", async (req, res) => {
   }
 });
 
-
 // PUT /api/gastypes/:id - actualizar tipo de gas (ADMIN)
 router.put("/gastypes/:id", auth, async (req, res) => {
   try {
@@ -481,6 +480,7 @@ router.post("/products", auth, async (req, res) => {
       codigo_barras,
       precio_venta,
       costo,
+      taxRate = 0, // Campo opcional con valor por defecto 0
       stock = 0,
       stock_minimo = 5,
       categoryId,
@@ -514,6 +514,7 @@ router.post("/products", auth, async (req, res) => {
         codigo_barras: codigo_barras || null,
         precio_venta: String(precio_venta),
         costo: String(costo),
+        taxRate: String(taxRate || 0), // Nuevo campo taxRate
         stock: Number(stock) || 0,
         stock_minimo: Number(stock_minimo) || 5,
         categoryId: category.id,
@@ -541,6 +542,7 @@ router.put("/products/:id", auth, async (req, res) => {
       codigo_barras,
       precio_venta,
       costo,
+      taxRate, // Nuevo campo taxRate
       stock,
       stock_minimo,
       categoryId,
@@ -553,6 +555,7 @@ router.put("/products/:id", auth, async (req, res) => {
         : {}),
       ...(precio_venta != null ? { precio_venta: String(precio_venta) } : {}),
       ...(costo != null ? { costo: String(costo) } : {}),
+      ...(taxRate !== undefined ? { taxRate: String(taxRate || 0) } : {}), // Nuevo campo taxRate
       ...(stock != null ? { stock: Number(stock) } : {}),
       ...(stock_minimo != null ? { stock_minimo: Number(stock_minimo) } : {}),
     };
@@ -880,9 +883,19 @@ router.get("/users", async (req, res) => {
 
 // POST /api/sales - registrar venta completa (protegido)
 // body: { userId, clientId, items: [...], payments: [...], creditInstallments?: [...] }
+// POST /api/sales - registrar venta completa (protegido)
+// body: { userId, clientId, items: [...], payments: [...], creditInstallments?: [...], subtotalNeto, ivaTotal, total }
 router.post("/sales", auth, async (req, res) => {
-  const { userId, clientId, items, payments, creditInstallments } =
-    req.body || {};
+  const {
+    userId,
+    clientId,
+    items,
+    payments,
+    creditInstallments,
+    total: frontendTotal,
+    subtotalNeto: frontendSubtotalNeto, // 🔥 NUEVO
+    ivaTotal: frontendIvaTotal, // 🔥 NUEVO
+  } = req.body || {};
 
   if (!userId) return res.status(400).json({ error: "userId es requerido" });
   if (!Array.isArray(items) || items.length === 0)
@@ -905,8 +918,24 @@ router.post("/sales", auth, async (req, res) => {
         if (!client) throw { status: 400, message: "Cliente no válido" };
       }
 
-      let total = 0;
       const saleItemsToCreate = [];
+
+      // 🔥 VARIABLES PARA CÁLCULOS - USAR VALORES DEL FRONTEND SI ESTÁN DISPONIBLES
+      let subtotalNeto = 0; // Suma de precios sin IVA
+      let ivaTotal = 0; // Suma de todos los IVAs
+      let totalVenta = 0; // SubtotalNeto + IvaTotal
+
+      // 🔥 VERIFICAR SI EL FRONTEND ENVÍA LOS VALORES CALCULADOS
+      const frontendSubtotalNeto = Number(req.body.subtotalNeto) || 0;
+      const frontendIvaTotal = Number(req.body.ivaTotal) || 0;
+      const frontendTotalCalculated = Number(req.body.total) || 0;
+
+      console.log("🔍 VALORES RECIBIDOS DEL FRONTEND:", {
+        frontendSubtotalNeto: frontendSubtotalNeto.toFixed(2),
+        frontendIvaTotal: frontendIvaTotal.toFixed(2),
+        frontendTotalCalculated: frontendTotalCalculated.toFixed(2),
+        items: items.length,
+      });
 
       for (const it of items) {
         const cantidad = Number(it.cantidad);
@@ -918,7 +947,6 @@ router.post("/sales", auth, async (req, res) => {
           throw { status: 400, message: "precio_unit es requerido en item" };
 
         const subtotal = Number(precioUnit) * cantidad;
-        total += subtotal;
 
         if (it.productId) {
           const product = await tx.product.findUnique({
@@ -935,17 +963,68 @@ router.post("/sales", auth, async (req, res) => {
             where: { id: product.id },
             data: { stock: nuevoStock },
           });
+
+          // 🔥 USAR VALORES DEL FRONTEND SI ESTÁN DISPONIBLES
+          let taxRate, ivaItem, totalItem, subtotalNetoItem;
+
+          if (it.taxRateApplied && it.taxAmount && it.totalProducto) {
+            // ✅ USAR VALORES CALCULADOS EN FRONTEND
+            taxRate = Number(it.taxRateApplied) || 0;
+            ivaItem = Number(it.taxAmount) || 0;
+            totalItem = Number(it.totalProducto) || subtotal;
+            subtotalNetoItem = totalItem - ivaItem;
+
+            console.log("🔥 USANDO VALORES DEL FRONTEND PARA PRODUCTO:", {
+              productId: product.id,
+              taxRate,
+              ivaItem,
+              totalItem,
+              subtotalNetoItem,
+            });
+          } else {
+            // ❌ FALLBACK: Calcular en backend (no debería ocurrir)
+            taxRate = Number(product.taxRate) || 0;
+            subtotalNetoItem = subtotal;
+            ivaItem =
+              taxRate > 0 ? (subtotalNetoItem / (1 + taxRate)) * taxRate : 0;
+            totalItem = subtotalNetoItem;
+
+            console.log("⚠️ USANDO FALLBACK DEL BACKEND PARA PRODUCTO:", {
+              productId: product.id,
+              taxRate,
+              ivaItem,
+              totalItem,
+              subtotalNetoItem,
+            });
+          }
+
+          // Acumular totales de la venta
+          subtotalNeto += subtotalNetoItem;
+          ivaTotal += ivaItem;
+          totalVenta += totalItem;
+
           saleItemsToCreate.push({
             productId: product.id,
             cantidad,
             precio_unit: String(precioUnit),
-            subtotal: String(subtotal.toFixed(2)),
+            subtotal: String(totalItem.toFixed(2)),
+            taxRateApplied: String(taxRate),
+            taxAmount: String(ivaItem.toFixed(2)),
           });
         } else if (it.gasTypeId) {
           const gas = await tx.gasType.findUnique({
             where: { id: Number(it.gasTypeId) },
           });
           if (!gas) throw { status: 400, message: "GasType no existe" };
+
+          // 🔥 VALIDACIÓN CRÍTICA: Stock de cilindros vacíos
+          if (recibioEnvase && gas.stock_vacios <= 0) {
+            throw {
+              status: 400,
+              message: `No hay stock de cilindros vacíos disponibles para recibir del producto: ${gas.nombre}`,
+            };
+          }
+
           const nuevoLlenos = gas.stock_llenos - cantidad;
           if (nuevoLlenos < 0)
             throw {
@@ -959,11 +1038,24 @@ router.post("/sales", auth, async (req, res) => {
             where: { id: gas.id },
             data: { stock_llenos: nuevoLlenos, stock_vacios: nuevoVacios },
           });
+
+          // Gas está exento de IVA
+          const subtotalNetoItem = subtotal;
+          const ivaItem = 0;
+          const totalItem = subtotal;
+
+          // Acumular totales de la venta
+          subtotalNeto += subtotalNetoItem;
+          ivaTotal += ivaItem;
+          totalVenta += totalItem;
+
           saleItemsToCreate.push({
             gasTypeId: gas.id,
             cantidad,
             precio_unit: String(precioUnit),
-            subtotal: String(subtotal.toFixed(2)),
+            subtotal: String(totalItem.toFixed(2)),
+            taxRateApplied: "0",
+            taxAmount: "0",
             recibio_envase: recibioEnvase,
           });
         } else {
@@ -972,6 +1064,21 @@ router.post("/sales", auth, async (req, res) => {
             message: "Cada item debe referenciar productId o gasTypeId",
           };
         }
+      }
+
+      // 🔥 PRIORIZAR VALORES DEL FRONTEND SI ESTÁN DISPONIBLES
+      let finalSubtotalNeto, finalIvaTotal, finalTotal;
+
+      if (frontendSubtotalNeto > 0 || frontendIvaTotal > 0) {
+        // ✅ USAR VALORES CALCULADOS EN FRONTEND
+        finalSubtotalNeto = frontendSubtotalNeto;
+        finalIvaTotal = frontendIvaTotal;
+        finalTotal = frontendTotalCalculated;
+      } else {
+        // ❌ FALLBACK: Usar valores calculados en backend
+        finalSubtotalNeto = subtotalNeto;
+        finalIvaTotal = ivaTotal;
+        finalTotal = totalVenta;
       }
 
       // ✅ CÁLCULO CORRECTO - Excluir pagos de crédito
@@ -986,22 +1093,22 @@ router.post("/sales", auth, async (req, res) => {
       let paymentStatus = "PAID";
       if (totalPaidCash === 0) {
         paymentStatus = "PENDING"; // Crédito total
-      } else if (totalPaidCash < total) {
+      } else if (totalPaidCash < finalTotal) {
         paymentStatus = "PARTIAL"; // Pago parcial
       }
 
-      // 🔥 AGREGAR ESTE CONSOLE.LOG
       console.log("🔍 ANÁLISIS DE PAGO:", {
         payments,
         cashPayments,
         totalPaidCash,
-        total,
+        finalTotal, // ✅ CORRECTO
         paymentStatus,
         creditInstallments,
         "¿Hay creditInstallments?":
           creditInstallments && creditInstallments.length > 0,
         "¿PaymentStatus es PENDING?": paymentStatus === "PENDING",
       });
+
       // Validar que clientId exista si hay crédito
       if (
         (paymentStatus === "PENDING" || paymentStatus === "PARTIAL") &&
@@ -1024,12 +1131,22 @@ router.post("/sales", auth, async (req, res) => {
           0
         );
 
-        // El total de cuotas debe coincidir con el saldo pendiente
-        const expectedInstallmentTotal = total - totalPaidCash; // ✅ USAR totalPaidCash
+        // Buscar el payment CREDIT para obtener el amount correcto (puede incluir interés)
+        const creditPayment = payments.find(
+          (p) => p.paymentMethod === "CREDIT"
+        );
+        const expectedInstallmentTotal = creditPayment
+          ? Number(creditPayment.amount)
+          : finalTotal - totalPaidCash; // ✅ CORRECTO
+
         if (Math.abs(totalInstallments - expectedInstallmentTotal) > 0.01) {
           throw {
             status: 400,
-            message: `El total de cuotas ($${totalInstallments}) no coincide con el saldo pendiente ($${expectedInstallmentTotal})`,
+            message: `El total de cuotas ($${totalInstallments.toFixed(
+              2
+            )}) no coincide con el saldo pendiente ($${expectedInstallmentTotal.toFixed(
+              2
+            )})`,
           };
         }
       }
@@ -1040,12 +1157,43 @@ router.post("/sales", auth, async (req, res) => {
         now.getTime() - now.getTimezoneOffset() * 60000
       ).toISOString();
 
-      // Crear venta
+      // 🔥 CÁLCULO CORRECTO DE INTERÉS SOBRE TOTAL CON IVA
+      let creditInterestAmount = 0;
+      let creditInterestType = null;
+      let totalCredito = finalTotal; // Por defecto, sin interés
+
+      if (creditInstallments && creditInstallments.length > 0) {
+        const creditPayment = payments.find(
+          (p) => p.paymentMethod === "CREDIT"
+        );
+
+        if (creditPayment) {
+          const interestType = creditPayment.interestType;
+          const interestValue = Number(creditPayment.interestValue) || 0;
+
+          // 🔥 CALCULAR INTERÉS SOBRE EL TOTAL CON IVA
+          if (interestType === "VALOR") {
+            creditInterestAmount = interestValue;
+          } else if (interestType === "PORCENTAJE") {
+            creditInterestAmount = finalTotal * (interestValue / 100);
+          }
+
+          creditInterestType = interestType;
+          totalCredito = finalTotal + creditInterestAmount;
+        }
+      }
+
+      // Crear venta con valores calculados
       const sale = await tx.sale.create({
         data: {
-          total: total,
+          total: finalTotal, // 🔥 TOTAL CORRECTO CON IVA
           paymentStatus,
           totalPaid: totalPaidCash,
+          creditInterestAmount:
+            creditInterestAmount > 0
+              ? Number(creditInterestAmount.toFixed(2))
+              : 0,
+          creditInterestType: creditInterestType,
           clientId: Number(clientId),
           userId: Number(userId),
           items: { create: saleItemsToCreate },
@@ -1086,11 +1234,16 @@ router.post("/sales", auth, async (req, res) => {
         });
       }
 
-      // 🔥 NUEVO: Devolver la venta con las cuotas incluidas
+      // 🔥 NUEVO: Devolver la venta con las cuotas incluidas Y desglose de IVA
       const finalSale = await tx.sale.findUnique({
         where: { id: sale.id },
         include: {
-          items: true,
+          items: {
+            include: {
+              product: { select: { nombre: true, taxRate: true } },
+              gasType: { select: { nombre: true } },
+            },
+          },
           client: { select: { id: true, nombre: true } },
           payments: true,
           creditInstallments: true, // 🔥 Incluir cuotas
@@ -1098,7 +1251,30 @@ router.post("/sales", auth, async (req, res) => {
         },
       });
 
-      return finalSale;
+      // Agregar desglose a la respuesta
+      const responseData = {
+        ...finalSale,
+        // 🔥 USAR VALORES FINALES CORRECTOS
+        subtotalNeto: Number(finalSubtotalNeto.toFixed(2)),
+        ivaTotal: Number(finalIvaTotal.toFixed(2)),
+        totalCredito: Number(totalCredito.toFixed(2)),
+        interestInfo: {
+          type: creditInterestType,
+          amount: Number(creditInterestAmount || 0),
+          description:
+            creditInterestType === "PORCENTAJE"
+              ? `Interés ${creditInterestAmount}%`
+              : `Interés $${Number(creditInterestAmount).toLocaleString(
+                  "es-EC",
+                  {
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2,
+                  }
+                )}`,
+        },
+      };
+
+      return responseData;
     });
 
     res.status(201).json(result);
@@ -1109,7 +1285,6 @@ router.post("/sales", auth, async (req, res) => {
     res.status(500).json({ error: "Error registrando la venta" });
   }
 });
-
 router.get("/users", auth, async (req, res) => {
   try {
     if (req.user.role !== "ADMIN")
@@ -1611,7 +1786,7 @@ router.get("/sales/pending-payments", auth, async (req, res) => {
     ]);
 
     // Formatear respuesta con detalles de cuotas
-     const salesWithInstallments = sales.map((sale) => {
+    const salesWithInstallments = sales.map((sale) => {
       const pendingInstallments = sale.creditInstallments.filter(
         (installment) => installment.status === "PENDING"
       );
@@ -1635,12 +1810,11 @@ router.get("/sales/pending-payments", auth, async (req, res) => {
         client: sale.client,
         user: sale.user,
         total: Number(sale.total),
-        totalPaid: sale.payments 
-        ? sale.payments
-            .filter(payment => payment.paymentMethod !== "CREDIT")
-            .reduce((sum, payment) => sum + Number(payment.amount), 0)
-        : 0,
-   
+        totalPaid: sale.payments
+          ? sale.payments
+              .filter((payment) => payment.paymentMethod !== "CREDIT")
+              .reduce((sum, payment) => sum + Number(payment.amount), 0)
+          : 0,
 
         // Información de cuotas
         creditInstallments: sale.creditInstallments.map((installment) => ({
@@ -1753,6 +1927,8 @@ router.get("/sales/:id", auth, async (req, res) => {
         user: {
           select: { id: true, nombre: true },
         },
+        payments: true,
+        creditInstallments: true, // 🔥 Incluir cuotas de crédito
       },
     });
 
@@ -1760,10 +1936,45 @@ router.get("/sales/:id", auth, async (req, res) => {
       return res.status(404).json({ error: "Venta no encontrada" });
     }
 
+    // ✅ CORRECCIÓN: Usar los valores de taxAmount ya guardados en BD
+    // Fórmula correcta:
+    // Subtotal Neto Total = Σ(SaleItem.subtotal) - Σ(SaleItem.taxAmount)
+    // IVA Total = Σ(SaleItem.taxAmount)
+    let subtotalNeto = 0;
+    let ivaTotal = 0;
+    sale.items.forEach((item) => {
+      const subtotal = Number(item.subtotal) || 0;
+      const taxAmount = Number(item.taxAmount) || 0;
+
+      subtotalNeto += subtotal - taxAmount;
+      ivaTotal += taxAmount;
+    });
+
+    console.log("🔍 DESGLOSE CORRECTO DE IVA:", {
+      subtotalNeto: subtotalNeto.toFixed(2),
+      ivaTotal: ivaTotal.toFixed(2),
+      total: (subtotalNeto + ivaTotal).toFixed(2),
+      items: sale.items.map((i) => ({
+        nombre: i.product?.nombre || i.gasType?.nombre,
+        subtotal: i.subtotal,
+        taxAmount: i.taxAmount,
+      })),
+    });
+
     // Formatear los datos para compatibilidad con el frontend
     const formattedSale = {
       ...sale,
       cliente: sale.client,
+      subtotalNeto: Number(subtotalNeto.toFixed(2)), // 🔥 Agregar desglose
+      ivaTotal: Number(ivaTotal.toFixed(2)), // 🔥 Agregar desglose
+      // 🔥 NUEVO: Total Crédito = Saldo Pendiente + Interés
+      totalCredito:
+        sale.creditInstallments && sale.creditInstallments.length > 0
+          ? sale.creditInstallments.reduce(
+              (sum, inst) => sum + Number(inst.amountDue || 0),
+              0
+            )
+          : 0,
       items: sale.items.map((item) => ({
         ...item,
         nombre: item.product?.nombre || item.gasType?.nombre || "Producto",
@@ -1781,7 +1992,6 @@ router.get("/sales/:id", auth, async (req, res) => {
     });
   }
 });
-
 
 // ===================== REPORTES (ADMIN) =====================
 router.get("/reports/sales", auth, async (req, res) => {
@@ -1819,9 +2029,6 @@ router.get("/reports/sales", auth, async (req, res) => {
     // Construir objeto de filtro - CORREGIDO
     const where = {
       createdAt: { gte: start, lte: end }, // ← Cambiado de 'fecha' a 'createdAt'
-      ...(metodo_pago
-        ? { metodo_pago: { equals: String(metodo_pago), mode: "insensitive" } }
-        : {}),
       ...(user_id ? { userId: Number(user_id) } : {}),
       ...(userId ? { userId: Number(userId) } : {}),
     };
@@ -1866,64 +2073,103 @@ router.get("/reports/sales", auth, async (req, res) => {
             },
           },
         },
+        creditInstallments: true, // 🔥 Incluir cuotas de crédito
+        payments: true, // 🔥 Incluir pagos
       },
     });
 
+    // Filtrar por metodo_pago si se proporciona
+    let filteredSales = sales;
+    if (metodo_pago) {
+      filteredSales = sales.filter((sale) =>
+        sale.payments.some(
+          (p) => p.paymentMethod.toLowerCase() === metodo_pago.toLowerCase()
+        )
+      );
+    }
+
     // Formatear la respuesta para el frontend - CORREGIDO
-    const formattedSales = sales.map((sale) => ({
-      id: sale.id,
-      fecha: sale.createdAt.toISOString(), // ← Cambiado de 'fecha' a 'createdAt'
-      fechaFormatted: new Date(sale.createdAt).toLocaleDateString("es-ES", {
-        // ← Cambiado
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-      total: Number(sale.total || 0).toFixed(2),
-      metodo_pago: sale.metodo_pago || "No especificado",
-      cliente: {
-        id: sale.client?.id,
-        nombre: sale.client?.nombre || "Cliente no especificado",
-        identificacion: sale.client?.identificacion || "N/A",
-        telefono: sale.client?.telefono || "N/A",
-      },
-      vendedor: {
-        id: sale.user?.id,
-        nombre: sale.user?.nombre || "Sin nombre",
-        username: sale.user?.username || "Sin usuario",
-      },
-      items: (sale.items || []).map((item) => ({
-        id: item.id,
-        tipo: item.gasType ? "gas" : "producto",
-        nombre:
-          item.product?.nombre ||
-          item.gasType?.nombre ||
-          "Producto desconocido",
-        cantidad: Number(item.cantidad || 0),
-        precio_unitario: Number(
-          item.product?.precio_venta ||
-            item.gasType?.precio_venta ||
-            item.precio_unitario ||
-            0
-        ).toFixed(2),
-        subtotal: Number(item.subtotal || 0).toFixed(2),
-        recibio_envase: item.recibio_envase || false,
-      })),
-      // Agregar totales para facilitar el frontend
-      total_productos: sale.items
-        .filter((item) => item.product)
-        .reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
-        .toFixed(2),
-      total_gas: sale.items
-        .filter((item) => item.gasType)
-        .reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
-        .toFixed(2),
-      total_envases: sale.items
-        .filter((item) => item.gasType && item.recibio_envase)
-        .reduce((sum, item) => sum + Number(item.cantidad || 0), 0),
-    }));
+    const formattedSales = filteredSales.map((sale) => {
+      // ✅ CORRECCIÓN: Usar los valores de taxAmount ya guardados en BD
+      let subtotalNeto = 0;
+      let ivaTotal = 0;
+      sale.items.forEach((item) => {
+        const subtotal = Number(item.subtotal) || 0;
+        const taxAmount = Number(item.taxAmount) || 0;
+
+        subtotalNeto += subtotal - taxAmount;
+        ivaTotal += taxAmount;
+      });
+
+      // Obtener métodos de pago de la venta
+      const paymentMethods = sale.payments
+        .map((p) => p.paymentMethod)
+        .filter((v, i, a) => a.indexOf(v) === i);
+
+      return {
+        id: sale.id,
+        fecha: sale.createdAt.toISOString(),
+        fechaFormatted: new Date(sale.createdAt).toLocaleDateString("es-ES", {
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        paymentStatus: sale.paymentStatus,
+        total: Number(sale.total || 0).toFixed(2),
+        subtotalNeto: Number(subtotalNeto.toFixed(2)),
+        ivaTotal: Number(ivaTotal.toFixed(2)),
+        metodo_pago: paymentMethods.join(", ") || "No especificado",
+        cliente: {
+          id: sale.client?.id,
+          nombre: sale.client?.nombre || "Cliente no especificado",
+          identificacion: sale.client?.identificacion || "N/A",
+          telefono: sale.client?.telefono || "N/A",
+        },
+        vendedor: {
+          id: sale.user?.id,
+          nombre: sale.user?.nombre || "Sin nombre",
+          username: sale.user?.username || "Sin usuario",
+        },
+        items: (sale.items || []).map((item) => ({
+          id: item.id,
+          tipo: item.gasType ? "gas" : "producto",
+          nombre:
+            item.product?.nombre ||
+            item.gasType?.nombre ||
+            "Producto desconocido",
+          cantidad: Number(item.cantidad || 0),
+          precio_unitario: Number(
+            item.product?.precio_venta ||
+              item.gasType?.precio_venta ||
+              item.precio_unitario ||
+              0
+          ).toFixed(2),
+          subtotal: Number(item.subtotal || 0).toFixed(2),
+          taxRateApplied: Number(item.taxRateApplied || 0),
+          taxAmount: Number(item.taxAmount || 0),
+          recibio_envase: item.recibio_envase || false,
+        })),
+        creditInstallments: (sale.creditInstallments || []).map((inst) => ({
+          installmentNumber: inst.installmentNumber,
+          amountDue: Number(inst.amountDue).toFixed(2),
+          dueDate: inst.dueDate.toISOString().split("T")[0],
+          status: inst.status,
+        })),
+        total_productos: sale.items
+          .filter((item) => item.product)
+          .reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+          .toFixed(2),
+        total_gas: sale.items
+          .filter((item) => item.gasType)
+          .reduce((sum, item) => sum + Number(item.subtotal || 0), 0)
+          .toFixed(2),
+        total_envases: sale.items
+          .filter((item) => item.gasType && item.recibio_envase)
+          .reduce((sum, item) => sum + Number(item.cantidad || 0), 0),
+      };
+    });
 
     res.json(formattedSales);
   } catch (err) {
@@ -1985,6 +2231,7 @@ async function computeSummaryForDateRange(startDate, endDate) {
             },
           },
         },
+        payments: true, // 🔥 NUEVO: Incluir pagos para obtener métodos de pago
       },
       orderBy: { createdAt: "asc" }, // ← Cambiado de 'fecha' a 'createdAt'
     });
@@ -2003,7 +2250,10 @@ async function computeSummaryForDateRange(startDate, endDate) {
 
     // Agrupar por método de pago
     const totalesPorMetodo = sales.reduce((acc, sale) => {
-      const metodo = sale.metodo_pago || "No especificado";
+      const metodos = sale.payments
+        ?.map((p) => p.paymentMethod)
+        .filter((v, i, a) => a.indexOf(v) === i) || ["No especificado"];
+      const metodo = metodos.join(", ");
       acc[metodo] = (acc[metodo] || 0) + Number(sale.total || 0);
       return acc;
     }, {});
@@ -2623,6 +2873,10 @@ router.post("/rentals", auth, async (req, res) => {
       hoursRented = 1,
       scheduledReturnDate,
       notes,
+      totalPrice, // 🔥 NUEVO: Recibir totalPrice del frontend
+      rentalType, // 🔥 NUEVO: Recibir rentalType
+      overnightAdditionalPrice, // 🔥 NUEVO: Recibir precio adicional
+      baseHourlyPrice, // 🔥 NUEVO: Recibir precio base
     } = req.body;
 
     // Validaciones
@@ -2670,7 +2924,15 @@ router.post("/rentals", auth, async (req, res) => {
     }
 
     // Calcular precio total
-    const rentalPrice = Number(machine.pricePerHour) * hoursRented;
+    // 🔥 CORRECCIÓN: Usar totalPrice del frontend si está disponible, sino calcular por defecto
+    let rentalPrice;
+    if (totalPrice && rentalType === 'OVERNIGHT') {
+      // Para OVERNIGHT, usar el precio enviado desde frontend
+      rentalPrice = Number(totalPrice);
+    } else {
+      // Para HOUR o si no se envía totalPrice, calcular como antes
+      rentalPrice = Number(machine.pricePerHour) * hoursRented;
+    }
 
     // Crear alquiler en transacción
     const result = await prisma.$transaction(async (tx) => {
@@ -2692,6 +2954,10 @@ router.post("/rentals", auth, async (req, res) => {
           userId: req.user.id,
           hoursRented: Number(hoursRented),
           notes: notes?.trim() || null,
+          // 🔥 NUEVO: Guardar campos adicionales para alquiler por amanecida
+          ...(rentalType && { rentalType }),
+          ...(overnightAdditionalPrice && { overnightAdditionalPrice: String(overnightAdditionalPrice) }),
+          ...(baseHourlyPrice && { baseHourlyPrice: String(baseHourlyPrice) }),
         },
       });
 
@@ -2903,21 +3169,23 @@ router.get("/rentals/reminders", auth, async (req, res) => {
     });
 
     // ✅ Clasificar por estado
-    const classified = rentals.map(rental => ({
+    const classified = rentals.map((rental) => ({
       ...rental,
-      urgency: 
-        new Date(rental.scheduledReturnDate) < now ? 'OVERDUE' : 'PENDING',
-      statusText: 
-        new Date(rental.scheduledReturnDate) < now ? 'ALQUILER VENCIDO' : 'POR VENCER'
+      urgency:
+        new Date(rental.scheduledReturnDate) < now ? "OVERDUE" : "PENDING",
+      statusText:
+        new Date(rental.scheduledReturnDate) < now
+          ? "ALQUILER VENCIDO"
+          : "POR VENCER",
     }));
 
-    const upcomingRentals = classified.filter(r => r.urgency === 'PENDING');
-    const overdueRentals = classified.filter(r => r.urgency === 'OVERDUE');
+    const upcomingRentals = classified.filter((r) => r.urgency === "PENDING");
+    const overdueRentals = classified.filter((r) => r.urgency === "OVERDUE");
 
     res.json({
       rentals: classified, // Todos los alquileres
-      upcomingRentals,    // Solo próximos
-      overdueRentals,     // Solo vencidos
+      upcomingRentals, // Solo próximos
+      overdueRentals, // Solo vencidos
       count: classified.length,
       upcomingCount: upcomingRentals.length,
       overdueCount: overdueRentals.length,
@@ -2929,6 +3197,7 @@ router.get("/rentals/reminders", auth, async (req, res) => {
   }
 });
 
+// PUT /api/rentals/:id - Actualizar alquiler (extender horas) (ADMIN/VENDEDOR)
 // PUT /api/rentals/:id - Actualizar alquiler (extender horas) (ADMIN/VENDEDOR)
 router.put("/rentals/:id", auth, async (req, res) => {
   try {
@@ -2944,7 +3213,7 @@ router.put("/rentals/:id", auth, async (req, res) => {
       return res.status(400).json({ error: "ID de alquiler inválido" });
     }
 
-    const { scheduledReturnDate, additionalPrice } = req.body;
+    const { scheduledReturnDate, additionalPrice, rentalType, isExtension } = req.body;
 
     if (!scheduledReturnDate) {
       return res
@@ -2952,7 +3221,7 @@ router.put("/rentals/:id", auth, async (req, res) => {
         .json({ error: "scheduledReturnDate es requerido" });
     }
 
-    // Verificar que el alquiler existe y está activo
+    // 🔥 VERIFICAR QUE EL ALQUILER EXISTE Y ESTÁ ACTIVO
     const existingRental = await prisma.rental.findUnique({
       where: { id: rentalId },
       include: {
@@ -2980,26 +3249,89 @@ router.put("/rentals/:id", auth, async (req, res) => {
         .json({ error: "La nueva fecha de devolución debe ser futura" });
     }
 
-    // Calcular nuevas horas y precio
-    const rentalDate = new Date(existingRental.rentalDate);
-    const hoursDiff = Math.ceil(
-      (newReturnDate - rentalDate) / (1000 * 60 * 60)
-    );
-    const newRentalPrice =
-      Number(existingRental.washingMachine.pricePerHour) * hoursDiff;
+    // 🔥 LÓGICA CORREGIDA PARA EXTENSIONES
+    let newRentalPrice;
+    let newHoursRented;
+    let notesText;
+
+    // 🔥 VERIFICAR TIPO DE ALQUILER ORIGINAL
+    const originalRentalType = existingRental.rentalType;
+    console.log("🔥 BACKEND: Tipo de alquiler original:", originalRentalType);
+    console.log("🔥 BACKEND: Tipo de extensión solicitada:", rentalType);
+    console.log("🔥 BACKEND: isExtension:", isExtension);
+    console.log("🔥 BACKEND: Precio actual:", existingRental.rentalPrice);
+    console.log("🔥 BACKEND: Horas actuales:", existingRental.hoursRented);
+
+    // 🔥 PRIORIDAD 1: SI EL ALQUILER ORIGINAL ES OVERNIGHT, SIEMPRE SUMAR ADICIONAL
+    if (originalRentalType === 'OVERNIGHT') {
+      // 🔥 SI EL ALQUILER ORIGINAL ES AMANECIDA: Siempre sumar adicional, nunca recalcular
+      console.log("🔥 BACKEND: Alquiler original es OVERNIGHT - preservando precio base");
+      console.log("Precio actual:", existingRental.rentalPrice);
+      console.log("Adicional:", additionalPrice);
+      
+      newRentalPrice = Number(existingRental.rentalPrice) + Number(additionalPrice || 0);
+      newHoursRented = existingRental.hoursRented; // Mantener horas originales
+      
+      const extensionTypeText = rentalType === 'OVERNIGHT' ? 'por amanecida' : 'por hora';
+      notesText = additionalPrice
+        ? `${existingRental.notes || ""}\nExtensión ${extensionTypeText}: +$${additionalPrice}`.trim()
+        : existingRental.notes;
+        
+      console.log("🔥 BACKEND: Nuevo precio total:", newRentalPrice);
+      console.log("🔥 BACKEND: Horas mantenidas:", newHoursRented);
+    } else if (isExtension && rentalType === 'OVERNIGHT') {
+      // 🔥 PRIORIDAD 2: SI EL ALQUILER ORIGINAL ES POR HORA pero se extiende como amanecida
+      console.log("🔥 BACKEND: Extensión por amanecida desde alquiler por hora");
+      
+      newRentalPrice = Number(existingRental.rentalPrice) + Number(additionalPrice || 0);
+      newHoursRented = existingRental.hoursRented; // Mantener horas originales
+      
+      notesText = additionalPrice
+        ? `${existingRental.notes || ""}\nExtensión por amanecida: +$${additionalPrice}`.trim()
+        : existingRental.notes;
+        
+      console.log("🔥 BACKEND: Nuevo precio total:", newRentalPrice);
+    } else if (isExtension && rentalType === 'HOUR') {
+      // 🔥 PRIORIDAD 3: PARA EXTENSIÓN POR HORA desde alquiler por hora
+      console.log("🔥 BACKEND: Extensión por hora detectada");
+      
+      const rentalDate = new Date(existingRental.rentalDate);
+      const hoursDiff = Math.ceil(
+        (newReturnDate - rentalDate) / (1000 * 60 * 60)
+      );
+      newRentalPrice = Number(existingRental.washingMachine.pricePerHour) * hoursDiff;
+      newHoursRented = hoursDiff;
+      
+      notesText = additionalPrice
+        ? `${existingRental.notes || ""}\nExtensión por hora: +${additionalPrice} horas` .trim()
+        : existingRental.notes;
+        
+      console.log("🔥 BACKEND: Nuevas horas:", hoursDiff);
+      console.log("🔥 BACKEND: Nuevo precio:", newRentalPrice);
+    } else {
+      // 🔥 LÓGICA ANTIGUA (para compatibilidad)
+      console.log("🔥 BACKEND: Usando lógica antigua (compatibilidad)");
+      const rentalDate = new Date(existingRental.rentalDate);
+      const hoursDiff = Math.ceil(
+        (newReturnDate - rentalDate) / (1000 * 60 * 60)
+      );
+      newRentalPrice = Number(existingRental.washingMachine.pricePerHour) * hoursDiff;
+      newHoursRented = hoursDiff;
+      notesText = existingRental.notes;
+      
+      console.log("🔥 BACKEND: Cálculo antiguo - horas:", hoursDiff, "precio:", newRentalPrice);
+    }
 
     // Actualizar alquiler
     const updatedRental = await prisma.rental.update({
       where: { id: rentalId },
       data: {
         scheduledReturnDate: newReturnDate,
-        hoursRented: hoursDiff,
+        hoursRented: newHoursRented,
         rentalPrice: String(newRentalPrice),
-        notes: additionalPrice
-          ? `${
-              existingRental.notes || ""
-            }\nRecargo adicional: $${additionalPrice}`.trim()
-          : existingRental.notes,
+        notes: notesText,
+        // 🔥 Actualizar tipo de alquiler si viene en la petición
+...(originalRentalType !== 'OVERNIGHT' && rentalType && { rentalType }),
       },
       include: {
         washingMachine: {
@@ -3019,13 +3351,16 @@ router.put("/rentals/:id", auth, async (req, res) => {
       },
     });
 
+    console.log("🔥 BACKEND: Alquiler actualizado exitosamente");
+    console.log("🔥 BACKEND: Precio final:", updatedRental.rentalPrice);
+    console.log("🔥 BACKEND: Horas finales:", updatedRental.hoursRented);
+
     res.json(updatedRental);
   } catch (error) {
     console.error("Error al actualizar alquiler:", error);
     res.status(500).json({ error: "Error al actualizar el alquiler" });
   }
 });
-
 // GET /api/reports/rentals-history - Historial completo de alquileres (ADMIN/VENDEDOR)
 router.get("/reports/rentals-history", auth, async (req, res) => {
   try {
@@ -3267,13 +3602,13 @@ router.get("/reminders", auth, async (req, res) => {
   try {
     const threeDaysFromNow = new Date();
     threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 2);
-    
+
     const reminders = await prisma.creditInstallment.findMany({
       where: {
         status: "PENDING",
         dueDate: {
-          lte: threeDaysFromNow
-        }
+          lte: threeDaysFromNow,
+        },
       },
       include: {
         sale: {
@@ -3282,17 +3617,17 @@ router.get("/reminders", auth, async (req, res) => {
               select: {
                 id: true,
                 nombre: true,
-                telefono: true
-              }
-            }
-          }
-        }
+                telefono: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
-        dueDate: 'asc'
-      }
+        dueDate: "asc",
+      },
     });
-    
+
     res.json(reminders);
   } catch (error) {
     console.error("Error obteniendo recordatorios:", error);

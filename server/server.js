@@ -179,6 +179,7 @@ async function ensureProducts() {
         codigo_barras: '001', 
         precio_venta: 25000, 
         costo: 15000, 
+        taxRate: 0,
         stock: 10, 
         stock_minimo: 5,
         categoryId: category.id 
@@ -188,6 +189,7 @@ async function ensureProducts() {
         codigo_barras: '002', 
         precio_venta: 35000, 
         costo: 20000, 
+        taxRate: 0,
         stock: 8, 
         stock_minimo: 3,
         categoryId: category.id 
@@ -197,6 +199,7 @@ async function ensureProducts() {
         codigo_barras: '003', 
         precio_venta: 18000, 
         costo: 10000, 
+        taxRate: 0,
         stock: 15, 
         stock_minimo: 8,
         categoryId: category.id 
@@ -206,6 +209,7 @@ async function ensureProducts() {
         codigo_barras: '004', 
         precio_venta: 8500, 
         costo: 4500, 
+        taxRate: 0,
         stock: 20, 
         stock_minimo: 10,
         categoryId: category.id 
@@ -215,6 +219,7 @@ async function ensureProducts() {
         codigo_barras: '005', 
         precio_venta: 12000, 
         costo: 7000, 
+        taxRate: 0,
         stock: 12, 
         stock_minimo: 6,
         categoryId: category.id 

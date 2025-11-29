@@ -4,6 +4,13 @@ Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrerí
 
 ## Características Principales
 
+# CacharreriaGasPOS
+
+Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrería con gestión completa de inventario, ventas, alquileres y reportes.
+
+## 🎯 Características Principales
+
+### 🏪 Sistema POS Completo
 - 🏪 **Sistema POS completo** para gestión de ventas
 - ⛽ **Gestión especializada de gas** con control de cilindros llenos/vacíos
 - 📦 **Control de inventario** con alertas de stock mínimo
@@ -12,12 +19,29 @@ Sistema de Punto de Venta (POS) especializado para negocios de gas y cacharrerí
 - 🔐 **Sistema de usuarios** con roles (ADMIN/VENDEDOR)
 - 💳 **Múltiples métodos de pago** (Efectivo, Nequi, Tarjeta, Transferencia)
 - 🏭 **Control de envases** (cascos) en transacciones de gas
-- ⏰ **Sistema de recordatorios** para pagos y devoluciones
+
+### 🧺 Gestión de Alquileres (NUEVO)
+- 🧺 **Alquileres por hora**: Sistema tradicional con cálculo por horas
+- 🌙 **Alquileres por amanecida**: Precio base + adicional personalizado
+- ⏰ **Extensión flexible**: Extender alquileres por hora o amanecida
+- 🔒 **Protección de datos**: Mantenimiento del tipo original de alquiler
+- 💰 **Cálculo automático**: Precios calculados según tipo y extensión
+- 🎨 **Modal mejorado**: Interfaz intuitiva con selector de tipo de extensión
+- ✏️ **Campos editables**: Permiten borrar y modificar valores
+
+### 📅 Sistema de Recordatorios y Alertas
+- ⏰ **Recordatorios automáticos** para pagos y devoluciones
 - 🚨 **Alertas visuales** para cuotas vencidas y por vencer
 - 💬 **Notificaciones WhatsApp** automáticas
-- 🧺 **Gestión de alquileres** de lavadoras con control de tiempo
-- 📅 **Sistema de recordatorios** para pagos y devoluciones con notificaciones automáticas
 - 📊 **Análisis de ventas** con gráficos y estadísticas
+- 📱 **Integración completa** con WhatsApp para contacto directo
+
+### 💰 Gestión de Cuentas por Cobrar
+- 📄 **Paginación mejorada**: Selector de items por página (10, 25, 50, 100)
+- 🔢 **Navegación avanzada**: Números de página con ellipsis
+- 🔍 **Filtros dinámicos**: Por cliente, rango de fechas
+- ⚠️ **Alertas inteligentes**: Vencidas y por vencer con colores diferenciados
+- 💸 **Procesamiento de pagos**: Múltiples cuotas simultáneas
 
 ## Arquitectura
 

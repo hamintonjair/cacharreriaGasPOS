@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import Invoice from "../components/Invoice.jsx";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
@@ -16,12 +16,29 @@ export default function POS() {
     open: false,
     installments: [],
     numInstallments: 1,
+    paymentFrequency: "MENSUAL", // DIARIO, SEMANAL, QUINCENAL, MENSUAL
     firstDueDate: new Date(),
+    interestType: null, // "PORCENTAJE" o "VALOR" o null
+    interestValue: 0, // Valor del interés (porcentaje o monto fijo)
+  });
+  const [creditInterestInput, setCreditInterestInput] = useState("");
+  const interestInputRef = useRef(null);
+
+  // Estado para el modal de ingreso de interés
+  const [interestValueModal, setInterestValueModal] = useState({
+    open: false,
+    type: null, // "PORCENTAJE" o "VALOR"
+    value: "",
   });
   const [activeTab, setActiveTab] = useState("CACHARRERIA"); // or 'GAS' or 'LAVADORAS'
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Estados para alquiler por amanecida
+  const [rentalType, setRentalType] = useState('HOUR'); // 'HOUR' o 'OVERNIGHT'
+  const [overnightAdditionalPrice, setOvernightAdditionalPrice] = useState(0)
+  const [deliveryDateTime, setDeliveryDateTime] = useState('')
 
   // Paginación
   const [productsPage, setProductsPage] = useState(1);
@@ -194,10 +211,11 @@ export default function POS() {
         <body>
           <div class="header">
             <div class="company-info">
-              ${company.logo_url
-        ? `<img src="http://localhost:5000${company.logo_url}" style="max-height: 60px; margin-bottom: 10px;" />`
-        : ""
-      }
+              ${
+                company.logo_url
+                  ? `<img src="http://localhost:5000${company.logo_url}" style="max-height: 60px; margin-bottom: 10px;" />`
+                  : ""
+              }
               <h1>${company.name}</h1>
               <div class="details">
                 <div>RUC/NIT: ${company.tax_id}</div>
@@ -209,9 +227,9 @@ export default function POS() {
             <div class="invoice-number">
               <h2>FACTURA</h2>
               <div class="number">No. #${String(lastSale.id).padStart(
-        6,
-        "0"
-      )}</div>
+                6,
+                "0"
+              )}</div>
             </div>
           </div>
           
@@ -222,26 +240,29 @@ export default function POS() {
             </div>
             <div>
               <div class="label">Estado de Pago:</div>
-              <div>${lastSale.paymentStatus === "PAID"
-        ? "PAGADO"
-        : lastSale.paymentStatus === "PENDING"
-          ? "CRÉDITO"
-          : "PARCIAL"
-      }</div>
+              <div>${
+                lastSale.paymentStatus === "PAID"
+                  ? "PAGADO"
+                  : lastSale.paymentStatus === "PENDING"
+                  ? "CRÉDITO"
+                  : "PARCIAL"
+              }</div>
             </div>
-            ${selectedClient
-        ? `
+            ${
+              selectedClient
+                ? `
               <div>
                 <div class="label">Cliente:</div>
                 <div>${selectedClient.nombre}</div>
-                ${selectedClient.identificacion
-          ? `<div style="font-size: 10px; color: #666;">CI/RUC: ${selectedClient.identificacion}</div>`
-          : ""
-        }
+                ${
+                  selectedClient.identificacion
+                    ? `<div style="font-size: 10px; color: #666;">CI/RUC: ${selectedClient.identificacion}</div>`
+                    : ""
+                }
               </div>
             `
-        : ""
-      }
+                : ""
+            }
             <div>
               <div class="label">Vendedor:</div>
               <div>${lastSale.user?.nombre || "N/A"}</div>
@@ -259,71 +280,74 @@ export default function POS() {
             </thead>
             <tbody>
               ${lastSale.items
-        ?.map(
-          (item) => `
+                ?.map(
+                  (item) => `
                 <tr>
                   <td>
                     <div>${item.product?.nombre || item.gasType?.nombre}</div>
-                    ${item.gasType
-              ? `<div style="font-size: 9px; color: #666;">${item.recibio_envase
-                ? "Con intercambio"
-                : "Sin intercambio"
-              }</div>`
-              : ""
-            }
+                    ${
+                      item.gasType
+                        ? `<div style="font-size: 9px; color: #666;">${
+                            item.recibio_envase
+                              ? "Con intercambio"
+                              : "Sin intercambio"
+                          }</div>`
+                        : ""
+                    }
                   </td>
                   <td class="text-center">${item.cantidad}</td>
                   <td class="text-right">$${Number(
-              item.precio_unit
-            ).toLocaleString("es-EC")}</td>
+                    item.precio_unit
+                  ).toLocaleString("es-EC")}</td>
                   <td class="text-right font-bold">$${Number(
-              item.subtotal
-            ).toLocaleString("es-EC")}</td>
+                    item.subtotal
+                  ).toLocaleString("es-EC")}</td>
                 </tr>
               `
-        )
-        .join("")}
+                )
+                .join("")}
             </tbody>
           </table>
           
-          ${lastSale.creditInstallments &&
-        lastSale.creditInstallments.length > 0
-        ? `
+          ${
+            lastSale.creditInstallments &&
+            lastSale.creditInstallments.length > 0
+              ? `
 <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
   <div style="text-align: center; font-weight: bold; margin-bottom: 10px; background-color: #f5f5f5; padding: 8px;">
     CUOTAS DE CRÉDITO
   </div>
   ${lastSale.creditInstallments
-          .map(
-            (installment) => `
+    .map(
+      (installment) => `
     <div style="display: flex; justify-content: space-between; font-size: 10px; padding: 3px 0; border-bottom: 1px solid #eee;">
       <span style="flex: 1;">
         Cuota ${installment.installmentNumber} - 
         ${new Date(installment.dueDate).toLocaleDateString("es-EC", {
-              year: "numeric",
-              month: "2-digit",
-              day: "2-digit",
-            })}
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        })}
       </span>
       <span style="font-weight: bold; text-align: right; min-width: 80px;">
         $${Number(installment.amountDue).toLocaleString("es-EC")}
       </span>
     </div>
   `
-          )
-          .join("")}
+    )
+    .join("")}
   <div style="margin-top: 8px; padding-top: 5px; border-top: 1px solid #ddd; display: flex; justify-content: space-between; font-weight: bold; font-size: 11px;">
     <span>Total Crédito:</span>
     <span>
       $${lastSale.creditInstallments
-          .reduce((sum, installment) => sum + Number(installment.amountDue), 0)
-          .toLocaleString("es-EC")}
+        .reduce((sum, installment) => sum + Number(installment.amountDue), 0)
+        .toLocaleString("es-EC")}
     </span>
   </div>
 </div>
 `
-        : ""
-      }
+              : ""
+          }
 
           <div class="totals">
             <div class="total-row grand-total">
@@ -334,31 +358,33 @@ export default function POS() {
 
             
             
-${lastSale.payments && lastSale.payments.length > 0
-        ? lastSale.payments
-          .map(
-            (payment, index) => `
+${
+  lastSale.payments && lastSale.payments.length > 0
+    ? lastSale.payments
+        .map(
+          (payment, index) => `
           <div class="total-row">
             <span>Pago ${index + 1} (${payment.paymentMethod}):</span>
             <span>$${Number(payment.amount).toLocaleString("es-EC")}</span>
           </div>
         `
-          )
-          .join("")
-        : ""
-      }
+        )
+        .join("")
+    : ""
+}
 
-${lastSale.paymentStatus === "PAID"
-        ? ""
-        : `
+${
+  lastSale.paymentStatus === "PAID"
+    ? ""
+    : `
         <div class="total-row" style="color: #dc2626;">
           <span>Saldo Pendiente:</span>
           <span>$${Number(lastSale.total - lastSale.totalPaid).toLocaleString(
-          "es-EC"
-        )}</span>
+            "es-EC"
+          )}</span>
         </div>
       `
-      }
+}
           </div>
           
           <div class="footer">
@@ -493,7 +519,7 @@ ${lastSale.paymentStatus === "PAID"
     return returnDate.toISOString();
   };
 
-  // Función para manejar el envío del alquiler
+  // Función para manejar el envío del alquiler (MÉTODO ORIGINAL)
   const handleRentalSubmit = async () => {
     if (!selectedClient) {
       toast("Debes seleccionar un cliente", "error");
@@ -503,19 +529,55 @@ ${lastSale.paymentStatus === "PAID"
       toast("Debes seleccionar una lavadora", "error");
       return;
     }
-    if (rentalForm.hoursRented < 1) {
+    if (rentalType === 'HOUR' && rentalForm.hoursRented < 1) {
       toast("Las horas deben ser mayor a 0", "error");
+      return;
+    }
+    if (rentalType === 'OVERNIGHT' && !deliveryDateTime) {
+      toast("Debes especificar la fecha y hora de entrega para alquiler por amanecida", "error");
       return;
     }
 
     setRentalLoading(true);
     try {
+      // 🔥 CORRECCIÓN: Para OVERNIGHT, enviar hoursRented = 1 para evitar cálculo incorrecto
+      const hoursToSend = rentalType === 'OVERNIGHT' ? 1 : rentalForm.hoursRented;
+      const scheduledReturnToSend = rentalType === 'OVERNIGHT' ? deliveryDateTime : rentalForm.scheduledReturnDate;
+
+      // 🔥 NUEVO: Calcular el precio final correcto según el tipo de alquiler
+      const machine = washingMachines.find(m => m.id === Number(rentalForm.washingMachineId));
+      let finalPrice = 0;
+      
+      if (rentalType === 'HOUR') {
+        // Por Hora: precio base × horas
+        finalPrice = machine ? Number(machine.pricePerHour) * rentalForm.hoursRented : 0;
+      } else {
+        // Por Amanecida: precio base + adicional
+        finalPrice = machine ? Number(machine.pricePerHour) + overnightAdditionalPrice : 0;
+      }
+
       const rentalData = {
         washingMachineId: Number(rentalForm.washingMachineId),
         clientId: selectedClient.id,
-        hoursRented: rentalForm.hoursRented,
-        scheduledReturnDate: rentalForm.scheduledReturnDate,
+        hoursRented: hoursToSend,
+        scheduledReturnDate: scheduledReturnToSend,
+        // 🔥 NUEVO: Enviar el precio final calculado correctamente
+        totalPrice: finalPrice,
+        // 🔥 NUEVO: Agregar campos especiales para identificar alquiler por amanecida
+        rentalType: rentalType,
+        ...(rentalType === 'OVERNIGHT' && {
+          overnightAdditionalPrice: overnightAdditionalPrice,
+          baseHourlyPrice: washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour
+        })
       };
+
+      // 🔥 DEBUG: Mostrar qué se está enviando al backend
+      console.log('🚀 ENVIANDO ALQUILER:', {
+        rentalType,
+        hoursToSend,
+        finalPrice,
+        rentalData
+      });
 
       const res = await fetch(`${API_URL}/rentals`, {
         method: "POST",
@@ -538,8 +600,11 @@ ${lastSale.paymentStatus === "PAID"
         washingMachineId: "",
         hoursRented: 1,
         rentalPrice: 0,
-        scheduledReturnDate: "",
+        scheduledReturnDate: calculateReturnDate(1),
       });
+      setRentalType('HOUR');
+      setOvernightAdditionalPrice(0);
+      setDeliveryDateTime('');
 
       // Recargar lavadoras disponibles
       await fetchWashingMachines();
@@ -550,46 +615,132 @@ ${lastSale.paymentStatus === "PAID"
     }
   };
 
+  // Función helper para recalcular cuotas con ajuste de redondeo
+  const recalculateInstallments = (modalState) => {
+    const cashPayments = payments.filter((p) => p.method !== "CREDIT");
+    const totalPaidCash = cashPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+    const pendingBalance = total - totalPaidCash;
+
+    const { installments: generatedInstallments, totalWithInterest } =
+      generateInstallments(
+        pendingBalance,
+        modalState.numInstallments,
+        modalState.firstDueDate,
+        modalState.paymentFrequency,
+        modalState.interestType,
+        modalState.interestValue
+      );
+
+    // Asegurar que el total de cuotas coincida exactamente con el monto con interés
+    let installments = [...generatedInstallments];
+    const totalInstallments = installments.reduce(
+      (sum, inst) => sum + inst.amountDue,
+      0
+    );
+    const difference = totalWithInterest - totalInstallments;
+
+    // Ajustar la última cuota si hay diferencia por redondeo
+    if (Math.abs(difference) > 0.01 && installments.length > 0) {
+      installments[installments.length - 1] = {
+        ...installments[installments.length - 1],
+        amountDue: Number(
+          (
+            installments[installments.length - 1].amountDue + difference
+          ).toFixed(2)
+        ),
+      };
+    }
+
+    return { installments, totalWithInterest };
+  };
+
   // Agrega después de las otras funciones
   const handleCreditModal = (open = true) => {
     if (open) {
-      // 🔥 CORRECCIÓN: Calcular saldo pendiente correctamente
-      const cashPayments = payments.filter((p) => p.method !== "CREDIT");
-      const totalPaidCash = cashPayments.reduce(
-        (sum, p) => sum + (p.amount || 0),
-        0
-      );
-      const pendingBalance = total - totalPaidCash;
-
-      const installments = generateInstallments(
-        pendingBalance,
-        creditModal.numInstallments,
-        creditModal.firstDueDate
-      );
-
+      const { installments, totalWithInterest } =
+        recalculateInstallments(creditModal);
       setCreditModal((prev) => {
-        return { ...prev, open: true, installments };
+        return { ...prev, open: true, installments, totalWithInterest };
       });
     } else {
-      setCreditModal((prev) => ({ ...prev, open: false, installments: [] }));
+      setCreditModal((prev) => ({
+        ...prev,
+        open: false,
+        installments: [],
+        totalWithInterest: 0,
+      }));
     }
   };
-  const generateInstallments = (amount, numInstallments, firstDueDate) => {
-    const installmentAmount = amount / numInstallments;
+  const generateInstallments = (
+    amount,
+    numInstallments,
+    firstDueDate,
+    paymentFrequency = "MENSUAL",
+    interestType = null,
+    interestValue = 0
+  ) => {
+    // Asegurar que los valores sean números válidos
+    const numAmount = Number(amount) || 0;
+    const numInstallmentsValue = Number(numInstallments) || 1;
+    const numInterestValue = Number(interestValue) || 0;
+
+    // Calcular monto con interés
+    let amountWithInterest = numAmount;
+    if (interestType === "PORCENTAJE" && numInterestValue > 0) {
+      // Si es porcentaje, aumentar el monto
+      amountWithInterest = numAmount * (1 + numInterestValue / 100);
+    } else if (interestType === "VALOR" && numInterestValue > 0) {
+      // Si es valor fijo, sumarlo
+      amountWithInterest = numAmount + numInterestValue;
+    }
+
+    // Calcular valor base de cada cuota
+    const baseInstallmentAmount = amountWithInterest / numInstallmentsValue;
     const installments = [];
 
-    for (let i = 0; i < numInstallments; i++) {
+    // Calcular días según frecuencia
+    const getDaysForFrequency = (frequency) => {
+      switch (frequency) {
+        case "DIARIO":
+          return 1;
+        case "SEMANAL":
+          return 7;
+        case "QUINCENAL":
+          return 15;
+        case "MENSUAL":
+          return 30;
+        default:
+          return 30;
+      }
+    };
+
+    const daysInterval = getDaysForFrequency(paymentFrequency);
+
+    // Calcular cuotas distribuyendo el monto equitativamente
+    let remainingAmount = amountWithInterest;
+    for (let i = 0; i < numInstallmentsValue; i++) {
       const dueDate = new Date(firstDueDate);
-      dueDate.setDate(dueDate.getDate() + 30 * i); // Cada 30 días
+      dueDate.setDate(dueDate.getDate() + daysInterval * i);
+
+      // Para la última cuota, usar el monto restante para evitar diferencias por redondeo
+      const isLastInstallment = i === numInstallmentsValue - 1;
+      const installmentAmount = isLastInstallment
+        ? Number(remainingAmount.toFixed(2))
+        : Number(baseInstallmentAmount.toFixed(2));
 
       installments.push({
         installmentNumber: i + 1,
         amountDue: installmentAmount,
         dueDate: dueDate.toISOString(),
       });
+
+      remainingAmount -= installmentAmount;
     }
 
-    return installments;
+    return { installments, totalWithInterest: amountWithInterest };
   };
 
   // Actualiza la función confirmCreditInstallments
@@ -654,13 +805,23 @@ ${lastSale.paymentStatus === "PAID"
       });
       return;
     }
+    // Para productos, buscar el taxRate del producto original
+    const productInfo = products.find((p) => p.id === item.id);
     setCart((prev) => {
       const existing = prev.find((i) => i.key === key);
       if (existing)
         return prev.map((i) =>
           i.key === key ? { ...i, cantidad: i.cantidad + 1 } : i
         );
-      return [...prev, { ...item, key, cantidad: 1 }];
+      return [
+        ...prev,
+        {
+          ...item,
+          key,
+          cantidad: 1,
+          taxRate: productInfo?.taxRate || 0, // Incluir taxRate del producto
+        },
+      ];
     });
   };
 
@@ -679,21 +840,60 @@ ${lastSale.paymentStatus === "PAID"
   const removeItem = (key) =>
     setCart((prev) => prev.filter((i) => i.key !== key));
 
-  const total = cart.reduce((sum, i) => sum + Number(i.precio) * i.cantidad, 0);
+  // Función para calcular el desglose de IVA
+  const calculateTaxBreakdown = () => {
+    let subtotalNeto = 0;
+    let ivaTotal = 0;
+
+    cart.forEach((item) => {
+      // Precio de venta (base sin IVA)
+      const precioVenta = Number(item.precio);
+      const cantidad = item.cantidad;
+      const baseImponible = precioVenta * cantidad;
+
+      if (item.type === "product") {
+        // Para productos: calcular IVA sobre la base imponible
+        const taxRate = Number(item.taxRate || 0);
+        if (taxRate > 0) {
+          // IVA = Base Imponible × Tasa IVA
+          const taxAmount = baseImponible * taxRate;
+          subtotalNeto += baseImponible;
+          ivaTotal += taxAmount;
+        } else {
+          // Sin IVA: solo la base imponible
+          subtotalNeto += baseImponible;
+        }
+      } else if (item.type === "gas" || item.type === "washing_machine") {
+        // Para Gas y Lavadoras: Subtotal Neto = Total Ítem y Monto IVA = 0
+        subtotalNeto += baseImponible;
+      }
+    });
+
+    const totalFinal = subtotalNeto + ivaTotal;
+
+    return {
+      subtotalNeto: Number(subtotalNeto.toFixed(2)),
+      ivaTotal: Number(ivaTotal.toFixed(2)),
+      totalFinal: Number(totalFinal.toFixed(2)),
+    };
+  };
+
+  const taxBreakdown = calculateTaxBreakdown();
+  const total = taxBreakdown.totalFinal; // Usar el total final calculado con IVA
 
   // Persist cart in localStorage
   useEffect(() => {
     try {
       const stored = localStorage.getItem("pos_cart");
       if (stored) setCart(JSON.parse(stored));
-    } catch { }
+    } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     try {
       localStorage.setItem("pos_cart", JSON.stringify(cart));
-    } catch { }
+    } catch {}
   }, [cart]);
 
   const clearCart = () => setCart([]);
@@ -714,42 +914,42 @@ ${lastSale.paymentStatus === "PAID"
     gasPage * itemsPerPage
   );
 
-const handleCheckout = async () => {
-  if (!cart.length) {
-    toast("El carrito está vacío", "error");
-    return;
-  }
-
-  // 🔥 CORRECCIÓN: Calcular pagos en efectivo/tarjeta/transferencia
-  const cashPayments = payments.filter((p) => p.method !== "CREDIT");
-  const totalPaidCash = cashPayments.reduce(
-    (sum, p) => sum + (p.amount || 0),
-    0
-  );
-  const hasPendingBalance = totalPaidCash < total;
-  
-  // ✅ Verificar correctamente si hay pagos de crédito
-  const hasCreditPayment = payments.some((p) => p.method === "CREDIT");
-
-  // Validar cliente solo si hay crédito o saldo pendiente
-  if ((hasPendingBalance || hasCreditPayment) && !selectedClient) {
-    setPaymentError("Debe seleccionar un cliente para ventas a crédito");
-    return;
-  }
-
-  // ✅ Solo configurar cuotas si hay crédito o saldo pendiente
-  if (hasPendingBalance || hasCreditPayment) {
-    if (creditModal.installments.length === 0) {
-      setPaymentError("Debe configurar las cuotas de crédito");
-      handleCreditModal(true);
+  const handleCheckout = async () => {
+    if (!cart.length) {
+      toast("El carrito está vacío", "error");
       return;
     }
-    await processSale(creditModal.installments);
-  } else {
-    // ✅ Pago completo en efectivo/tarjeta/transferencia
-    await processSale();
-  }
-};
+
+    // 🔥 CORRECCIÓN: Calcular pagos en efectivo/tarjeta/transferencia
+    const cashPayments = payments.filter((p) => p.method !== "CREDIT");
+    const totalPaidCash = cashPayments.reduce(
+      (sum, p) => sum + (p.amount || 0),
+      0
+    );
+    const hasPendingBalance = totalPaidCash < total;
+
+    // ✅ Verificar correctamente si hay pagos de crédito
+    const hasCreditPayment = payments.some((p) => p.method === "CREDIT");
+
+    // Validar cliente solo si hay crédito o saldo pendiente
+    if ((hasPendingBalance || hasCreditPayment) && !selectedClient) {
+      setPaymentError("Debe seleccionar un cliente para ventas a crédito");
+      return;
+    }
+
+    // ✅ Solo configurar cuotas si hay crédito o saldo pendiente
+    if (hasPendingBalance || hasCreditPayment) {
+      if (creditModal.installments.length === 0) {
+        setPaymentError("Debe configurar las cuotas de crédito");
+        handleCreditModal(true);
+        return;
+      }
+      await processSale(creditModal.installments);
+    } else {
+      // ✅ Pago completo en efectivo/tarjeta/transferencia
+      await processSale();
+    }
+  };
 
   const processSale = async (installments = []) => {
     setPaymentError("");
@@ -760,23 +960,104 @@ const handleCheckout = async () => {
       const user = userStr ? JSON.parse(userStr) : null;
       if (!user?.id) throw new Error("Usuario no autenticado");
 
-      const items = cart.map((i) => ({
-        ...(i.type === "product" ? { productId: i.id } : {}),
-        ...(i.type === "gas"
-          ? { gasTypeId: i.id, recibio_envase: Boolean(i.recibio_envase) }
-          : {}),
-        cantidad: i.cantidad,
-        precio_unit: i.precio,
-      }));
+      // 🔥 NUEVO: Calcular IVA por producto en el frontend
+      const itemsConIVA = cart.map((i) => {
+        const precioUnit = Number(i.precio) || 0;
+        const cantidad = Number(i.cantidad) || 0;
+        const taxRate = i.type === "product" ? Number(i.taxRate || 0) : 0; // Gas y lavadoras no tienen IVA
+
+        // 🔥 CÁLCULO INDEPENDIENTE DE IVA POR PRODUCTO
+        const ivaUnitario = precioUnit * taxRate;
+        const ivaTotalProducto = ivaUnitario * cantidad;
+        const totalProducto = precioUnit * cantidad;
+
+        const itemBase = {
+          ...(i.type === "product" ? { productId: i.id } : {}),
+          ...(i.type === "gas"
+            ? { gasTypeId: i.id, recibio_envase: Boolean(i.recibio_envase) }
+            : {}),
+          ...(i.type === "washing_machine"
+            ? { 
+                washingMachineId: i.id,
+                horasAlquiler: i.horasAlquiler,
+                rentalType: i.rentalType,
+                scheduledReturnDate: i.scheduledReturnDate,
+                ...(i.overnightAdditionalPrice && { overnightAdditionalPrice: i.overnightAdditionalPrice })
+              }
+            : {}),
+          cantidad: i.cantidad,
+          precio_unit: i.precio,
+          // 🔥 NUEVO: Enviar desglose de IVA calculado en frontend
+          taxRateApplied: String(taxRate),
+          taxAmount: String(ivaTotalProducto.toFixed(2)),
+          totalProducto: String(totalProducto.toFixed(2)),
+        };
+
+        return itemBase;
+      });
+
+      // 🔥 NUEVO: Calcular totales de IVA en frontend
+      let subtotalNetoFrontend = 0;
+      let ivaTotalFrontend = 0;
+      let totalFrontend = 0;
+
+      itemsConIVA.forEach((item) => {
+        const subtotalNeto = Number(item.subtotalNeto) || 0;
+        const taxAmount = Number(item.taxAmount) || 0;
+        const total = Number(item.totalProducto) || 0;
+
+        subtotalNetoFrontend += subtotalNeto;
+        ivaTotalFrontend += taxAmount;
+        totalFrontend += total;
+      });
+
+      // Calcular saldo pendiente correctamente
+      const cashPayments = payments.filter((p) => p.method !== "CREDIT");
+      const totalPaidCash = cashPayments.reduce(
+        (sum, p) => sum + (p.amount || 0),
+        0
+      );
+      const pendingBalance = total - totalPaidCash;
+
+      // Calcular monto con interés para el pago CREDIT
+      let creditAmount = pendingBalance;
+      if (
+        creditModal.interestType === "PORCENTAJE" &&
+        creditModal.interestValue > 0
+      ) {
+        creditAmount =
+          pendingBalance * (1 + Number(creditModal.interestValue) / 100);
+      } else if (
+        creditModal.interestType === "VALOR" &&
+        creditModal.interestValue > 0
+      ) {
+        creditAmount = pendingBalance + Number(creditModal.interestValue);
+      }
+
+      // Preparar pagos: si hay CREDIT, usar el saldo pendiente con interés
+      const processedPayments = payments.map((p) => {
+        if (p.method === "CREDIT") {
+          return {
+            amount: creditAmount, // Usar el saldo pendiente con interés
+            paymentMethod: p.method,
+            interestType: creditModal.interestType, // 🔥 NUEVO: Incluir tipo de interés
+            interestValue: creditModal.interestValue, // 🔥 NUEVO: Incluir valor de interés
+          };
+        }
+        return {
+          amount: p.amount,
+          paymentMethod: p.method,
+        };
+      });
 
       const body = {
         userId: user.id,
         clientId: selectedClient?.id || 1,
-        items,
-        payments: payments.map((p) => ({
-          amount: p.amount,
-          paymentMethod: p.method,
-        })),
+        items: itemsConIVA, // 🔥 Enviar items con IVA calculado
+        ivaTotal: ivaTotalFrontend,
+        subtotalNeto: totalFrontend,
+        total: pendingBalance,
+        payments: processedPayments,
         ...(installments.length > 0 && { creditInstallments: installments }),
       };
 
@@ -787,6 +1068,7 @@ const handleCheckout = async () => {
       });
 
       const data = await res.json();
+
       if (!res.ok) throw new Error(data?.error || "Error procesando venta");
 
       // Resetear estados
@@ -822,24 +1104,27 @@ const handleCheckout = async () => {
       <div className="mt-3 grid grid-cols-3 gap-2">
         <button
           onClick={() => setActiveTab("CACHARRERIA")}
-          className={`h-12 rounded-lg font-semibold ${activeTab === "CACHARRERIA"
+          className={`h-12 rounded-lg font-semibold ${
+            activeTab === "CACHARRERIA"
               ? "bg-blue-600 text-white"
               : "bg-gray-100"
-            }`}
+          }`}
         >
           CACHARRERÍA
         </button>
         <button
           onClick={() => setActiveTab("GAS")}
-          className={`h-12 rounded-lg font-semibold ${activeTab === "GAS" ? "bg-blue-600 text-white" : "bg-gray-100"
-            }`}
+          className={`h-12 rounded-lg font-semibold ${
+            activeTab === "GAS" ? "bg-blue-600 text-white" : "bg-gray-100"
+          }`}
         >
           GAS
         </button>
         <button
           onClick={() => setActiveTab("LAVADORAS")}
-          className={`h-12 rounded-lg font-semibold ${activeTab === "LAVADORAS" ? "bg-blue-600 text-white" : "bg-gray-100"
-            }`}
+          className={`h-12 rounded-lg font-semibold ${
+            activeTab === "LAVADORAS" ? "bg-blue-600 text-white" : "bg-gray-100"
+          }`}
         >
           LAVADORAS
         </button>
@@ -862,6 +1147,7 @@ const handleCheckout = async () => {
                     id: p.id,
                     nombre: p.nombre,
                     precio: p.precio_venta,
+                    taxRate: p.taxRate || 0, // Incluir taxRate del producto
                   })
                 }
                 className="border rounded-xl p-3 text-left bg-white hover:bg-gray-50 active:scale-95 transition shadow-sm"
@@ -976,6 +1262,58 @@ const handleCheckout = async () => {
               Formulario de Alquiler
             </h3>
 
+            {/* 🔥 NUEVO: Selector de Tipo de Alquiler */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tipo de Alquiler:
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => {
+                    setRentalType('HOUR');
+                    // Resetear a valores por defecto para alquiler por hora
+                    setRentalForm(prev => ({
+                      ...prev,
+                      hoursRented: 1,
+                      scheduledReturnDate: calculateReturnDate(1)
+                    }));
+                  }}
+                  className={`p-3 border-2 rounded-lg transition-colors ${
+                    rentalType === 'HOUR'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="text-center">
+                    <div className="text-sm font-bold">Por Hora</div>
+                    <div className="text-xs text-gray-500">Precio por hora</div>
+                  </div>
+                </button>
+                
+                <button
+                  onClick={() => {
+                    setRentalType('OVERNIGHT');
+                    // Resetear para alquiler por amanecida
+                    setRentalForm(prev => ({
+                      ...prev,
+                      hoursRented: 999, // 🔥 Indicador especial
+                      scheduledReturnDate: deliveryDateTime || ''
+                    }));
+                  }}
+                  className={`p-3 border-2 rounded-lg transition-colors ${
+                    rentalType === 'OVERNIGHT'
+                      ? 'border-purple-500 bg-purple-50 text-purple-700'
+                      : 'border-gray-200 hover:border-gray-300'
+                  }`}
+                >
+                  <div className="text-center">
+                    <div className="text-sm font-bold">Por Amanecida</div>
+                    <div className="text-xs text-gray-500">Tarifa especial</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
             {/* Selección de Lavadora */}
             <div className="mb-4">
               <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -987,15 +1325,27 @@ const handleCheckout = async () => {
                   const machine = washingMachines.find(
                     (m) => m.id === Number(e.target.value)
                   );
+                  
+                  let newRentalPrice = 0;
+                  
+                  if (rentalType === 'HOUR') {
+                    newRentalPrice = machine
+                      ? Number(machine.pricePerHour) * rentalForm.hoursRented
+                      : 0;
+                  } else {
+                    // 🔥 OVERNIGHT: precio base + adicional
+                    newRentalPrice = machine
+                      ? Number(machine.pricePerHour) + overnightAdditionalPrice
+                      : 0;
+                  }
+                  
                   setRentalForm({
                     ...rentalForm,
                     washingMachineId: e.target.value,
-                    rentalPrice: machine
-                      ? Number(machine.pricePerHour) * rentalForm.hoursRented
-                      : 0,
-                    scheduledReturnDate: calculateReturnDate(
-                      rentalForm.hoursRented
-                    ),
+                    rentalPrice: newRentalPrice,
+                    scheduledReturnDate: rentalType === 'HOUR' 
+                      ? calculateReturnDate(rentalForm.hoursRented)
+                      : deliveryDateTime,
                   });
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -1011,69 +1361,138 @@ const handleCheckout = async () => {
               </select>
             </div>
 
-            {/* Horas a Alquilar */}
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Horas a Alquilar:
-              </label>
-              <input
-                type="number"
-                min="1"
-                value={rentalForm.hoursRented}
-                onChange={(e) => {
-                  const hours = Math.max(1, parseInt(e.target.value) || 1);
-                  const machine = washingMachines.find(
-                    (m) => m.id === Number(rentalForm.washingMachineId)
-                  );
-                  setRentalForm({
-                    ...rentalForm,
-                    hoursRented: hours,
-                    rentalPrice: machine
-                      ? Number(machine.pricePerHour) * hours
-                      : 0,
-                    scheduledReturnDate: calculateReturnDate(hours),
-                  });
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
+            {/* 🕐 Horas a Alquilar (solo para HOUR) */}
+            {rentalType === 'HOUR' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Horas a Alquilar:
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="12"
+                  value={rentalForm.hoursRented}
+                  onChange={(e) => {
+                    const hours = parseInt(e.target.value) || 1;
+                    const machine = washingMachines.find(
+                      (m) => m.id === Number(rentalForm.washingMachineId)
+                    );
+                    setRentalForm({
+                      ...rentalForm,
+                      hoursRented: hours,
+                      rentalPrice: machine
+                        ? Number(machine.pricePerHour) * hours
+                        : 0,
+                      scheduledReturnDate: calculateReturnDate(hours),
+                    });
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            )}
 
-            {/* Valor Total Calculado */}
-            <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-              <div className="flex justify-between items-center">
-                <span className="font-medium">Valor Total:</span>
-                <span className="text-xl font-bold text-blue-600">
-                  ${rentalForm.rentalPrice.toLocaleString()}
-                </span>
+            {/* 🔥 NUEVO: Precio Adicional Amanecida (solo para OVERNIGHT) */}
+            {rentalType === 'OVERNIGHT' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Precio Amanecida (Adicional):
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={overnightAdditionalPrice === 0 ? "" : overnightAdditionalPrice}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    const additionalPrice = value === "" ? 0 : parseFloat(value) || 0;
+                    setOvernightAdditionalPrice(additionalPrice);
+                    
+                    // Recalcular precio total
+                    const machine = washingMachines.find(
+                      (m) => m.id === Number(rentalForm.washingMachineId)
+                    );
+                    const newRentalPrice = machine
+                      ? Number(machine.pricePerHour) + additionalPrice
+                      : 0;
+                    
+                    setRentalForm(prev => ({
+                      ...prev,
+                      rentalPrice: newRentalPrice
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  placeholder="0.00"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Valor adicional que se suma al precio base por hora
+                </p>
+              </div>
+            )}
+
+            {/* 🔥 NUEVO: Fecha y Hora de Entrega (solo para OVERNIGHT) */}
+            {rentalType === 'OVERNIGHT' && (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Fecha y Hora de Entrega Final:
+                </label>
+                <input
+                  type="datetime-local"
+                  value={deliveryDateTime}
+                  onChange={(e) => {
+                    setDeliveryDateTime(e.target.value);
+                    setRentalForm(prev => ({
+                      ...prev,
+                      scheduledReturnDate: e.target.value
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                />
+              </div>
+            )}
+
+            {/* 📊 Resumen del Cálculo */}
+            <div className="bg-gray-50 p-4 rounded-lg mb-4">
+              <h4 className="text-sm font-bold text-gray-700 mb-2">Resumen:</h4>
+              <div className="space-y-1 text-sm">
+                {rentalType === 'HOUR' ? (
+                  <>
+                    <div className="flex justify-between">
+                      <span>Precio por hora:</span>
+                      <span>
+                        ${washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Horas:</span>
+                      <span>{rentalForm.hoursRented}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-blue-600 pt-2 border-t">
+                      <span>Total:</span>
+                      <span>${rentalForm.rentalPrice.toFixed(2)}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between">
+                      <span>Precio base por hora:</span>
+                      <span>
+                        ${washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour || 0}
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Adicional amanecida:</span>
+                      <span>${overnightAdditionalPrice.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-bold text-purple-600 pt-2 border-t">
+                      <span>Precio unitario final:</span>
+                      <span>${rentalForm.rentalPrice.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
-            {/* Fecha y Hora de Entrega */}
-            <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-              <div className="text-sm">
-                <div className="font-medium text-blue-800">
-                  Fecha y Hora de Entrega Programada:
-                </div>
-                <div className="text-blue-600">
-                  {rentalForm.scheduledReturnDate
-                    ? new Date(rentalForm.scheduledReturnDate).toLocaleString(
-                      "es-CO",
-                      {
-                        weekday: "long",
-                        year: "numeric",
-                        month: "long",
-                        day: "numeric",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      }
-                    )
-                    : "Selecciona lavadora y horas"}
-                </div>
-              </div>
-            </div>
-
-            {/* Botón de Alquiler */}
+            {/* Botón de alquiler directo (MÉTODO ORIGINAL) */}
             <button
               onClick={handleRentalSubmit}
               disabled={
@@ -1087,51 +1506,6 @@ const handleCheckout = async () => {
             {!selectedClient && (
               <div className="mt-2 text-sm text-amber-600 bg-amber-50 p-2 rounded">
                 ⚠️ Debes seleccionar un cliente antes de alquilar
-              </div>
-            )}
-          </div>
-
-          {/* Lista de Lavadoras Disponibles */}
-          <div>
-            <h3 className="font-semibold text-lg mb-3">
-              Lavadoras Disponibles
-            </h3>
-            {washingMachines.length === 0 ? (
-              <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">
-                No hay lavadoras disponibles para alquiler
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {washingMachines.map((machine) => (
-                  <button
-                    key={machine.id}
-                    onClick={() => {
-                      setRentalForm({
-                        ...rentalForm,
-                        washingMachineId: machine.id.toString(),
-                        rentalPrice:
-                          Number(machine.pricePerHour) * rentalForm.hoursRented,
-                        scheduledReturnDate: calculateReturnDate(
-                          rentalForm.hoursRented
-                        ),
-                      });
-                    }}
-                    className={`border rounded-xl p-4 text-left bg-white hover:bg-gray-50 active:scale-95 transition shadow-sm ${rentalForm.washingMachineId === machine.id.toString()
-                        ? "ring-2 ring-blue-500"
-                        : ""
-                      }`}
-                  >
-                    <div className="font-semibold text-base">
-                      {machine.description}
-                    </div>
-                    <div className="mt-1 text-blue-600 font-bold text-lg">
-                      ${Number(machine.pricePerHour).toLocaleString()}/hora
-                    </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      Disponibles: {machine.availableQuantity}
-                    </div>
-                  </button>
-                ))}
               </div>
             )}
           </div>
@@ -1189,13 +1563,26 @@ const handleCheckout = async () => {
                 <div className="font-semibold">{i.nombre}</div>
                 <div className="text-sm text-gray-500">
                   ${Number(i.precio).toLocaleString()} ·{" "}
-                  {i.type === "gas" ? "Gas" : "Producto"}
+                  {i.type === "gas" ? "Gas" : i.type === "washing_machine" ? "Lavadora" : "Producto"}
                 </div>
                 {i.type === "gas" && (
                   <div className="text-xs text-gray-500">
                     {i.recibio_envase
                       ? "Con intercambio (sin depósito)"
                       : "Sin intercambio (incluye depósito)"}
+                  </div>
+                )}
+                {i.type === "washing_machine" && (
+                  <div className="text-xs text-gray-500">
+                    {i.rentalType === 'OVERNIGHT' 
+                      ? 'Alquiler por Amanecida'
+                      : `${i.horasAlquiler} hora(s) a $${i.pricePerHour}/hora`
+                    }
+                    {i.scheduledReturnDate && (
+                      <div className="text-xs text-purple-600">
+                        Entrega: {new Date(i.scheduledReturnDate).toLocaleString()}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1233,15 +1620,50 @@ const handleCheckout = async () => {
                 +
               </button>
               <div className="ml-auto text-lg font-bold">
-                ${(Number(i.precio) * i.cantidad).toLocaleString()}
+                $
+                {(() => {
+                  const precioVenta = Number(i.precio);
+                  const cantidad = i.cantidad;
+                  const base = precioVenta * cantidad;
+
+                  if (i.type === "product") {
+                    const taxRate = Number(i.taxRate || 0);
+                    const iva = taxRate > 0 ? base * taxRate : 0;
+                    return (base + iva).toLocaleString();
+                  } else if (i.type === "washing_machine") {
+                    // Para lavadoras, el precio ya incluye el cálculo total
+                    return (precioVenta * cantidad).toLocaleString();
+                  } else {
+                    // Gas: sin IVA
+                    return base.toLocaleString();
+                  }
+                })()}
               </div>
             </div>
           </div>
         ))}
       </div>
       <div className="border-t bg-white p-3 sm:p-4">
-        <div className="flex items-center justify-between">
-          <div className="text-base text-gray-600">TOTAL</div>
+        {/* Desglose de IVA */}
+        <div className="mb-4 space-y-2 pb-4 border-b">
+          <div className="flex items-center justify-between text-sm">
+            <div className="text-gray-600">Subtotal Neto:</div>
+            <div className="font-semibold text-gray-700">
+              ${taxBreakdown.subtotalNeto.toLocaleString()}
+            </div>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <div className="text-gray-600">IVA Total:</div>
+            <div className="font-semibold text-gray-700">
+              ${taxBreakdown.ivaTotal.toLocaleString()}
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-base text-gray-600 font-semibold">
+            TOTAL FINAL
+          </div>
           <div className="text-2xl font-extrabold text-gray-900">
             ${total.toLocaleString()}
           </div>
@@ -1269,7 +1691,7 @@ const handleCheckout = async () => {
                       method,
                       amount:
                         method === "CREDIT"
-                          ? total - (payments[1]?.amount || 0)
+                          ? 0 // Para CREDIT, el amount se calculará dinámicamente al enviar
                           : newPayments[0]?.amount || 0,
                     };
 
@@ -1318,10 +1740,30 @@ const handleCheckout = async () => {
                 </label>
                 <input
                   type="number"
-                  value={payments[0]?.amount || ""}
+                  value={
+                    payments[0]?.method === "CREDIT"
+                      ? (() => {
+                          // Si es CREDIT, mostrar saldo pendiente calculado
+                          const otherPayments = payments.filter(
+                            (_, idx) => idx !== 0
+                          );
+                          const totalOtherPayments = otherPayments.reduce(
+                            (sum, p) => sum + (p.amount || 0),
+                            0
+                          );
+                          return total - totalOtherPayments;
+                        })()
+                      : payments[0]?.amount || ""
+                  }
                   onChange={(e) => {
                     const amount = Number(e.target.value) || 0;
                     const newPayments = [...payments];
+
+                    // Si el método es CREDIT, no permitir editar el amount manualmente
+                    if (newPayments[0]?.method === "CREDIT") {
+                      return; // No hacer nada si es CREDIT
+                    }
+
                     newPayments[0] = { ...newPayments[0], amount };
 
                     // Si el monto es menor al total, agregar segundo pago
@@ -1342,7 +1784,12 @@ const handleCheckout = async () => {
                     setPayments(newPayments);
                     setPaymentError("");
                   }}
-                  className="w-full px-2 py-1 text-sm border border-gray-300 rounded"
+                  readOnly={payments[0]?.method === "CREDIT"}
+                  className={`w-full px-2 py-1 text-sm border border-gray-300 rounded ${
+                    payments[0]?.method === "CREDIT"
+                      ? "bg-gray-100 cursor-not-allowed"
+                      : ""
+                  }`}
                   placeholder="0.00"
                   min="0"
                   step="0.01"
@@ -1370,7 +1817,7 @@ const handleCheckout = async () => {
                         method,
                         amount:
                           method === "CREDIT"
-                            ? total - (payments[0]?.amount || 0)
+                            ? 0 // Para CREDIT, el amount se calculará dinámicamente al enviar
                             : newPayments[1]?.amount || 0,
                       };
 
@@ -1522,7 +1969,53 @@ const handleCheckout = async () => {
     );
     const pendingBalance = total - totalPaidCash;
 
-    const installmentAmount = pendingBalance / creditModal.numInstallments;
+    // Calcular monto con interés
+    let amountWithInterest = pendingBalance;
+    if (
+      creditModal.interestType === "PORCENTAJE" &&
+      creditModal.interestValue > 0
+    ) {
+      amountWithInterest =
+        pendingBalance * (1 + creditModal.interestValue / 100);
+    } else if (
+      creditModal.interestType === "VALOR" &&
+      creditModal.interestValue > 0
+    ) {
+      amountWithInterest = pendingBalance + creditModal.interestValue;
+    }
+
+    const { installments: generatedInstallments, totalWithInterest } =
+      generateInstallments(
+        pendingBalance,
+        creditModal.numInstallments,
+        creditModal.firstDueDate,
+        creditModal.paymentFrequency,
+        creditModal.interestType,
+        creditModal.interestValue
+      );
+
+    // Asegurar que el total de cuotas coincida exactamente con el monto con interés
+    let installments = [...generatedInstallments];
+    const totalInstallments = installments.reduce(
+      (sum, inst) => sum + inst.amountDue,
+      0
+    );
+    const difference = totalWithInterest - totalInstallments;
+
+    // Ajustar la última cuota si hay diferencia por redondeo (más de 1 centavo)
+    if (Math.abs(difference) > 0.01 && installments.length > 0) {
+      installments[installments.length - 1] = {
+        ...installments[installments.length - 1],
+        amountDue: Number(
+          (
+            installments[installments.length - 1].amountDue + difference
+          ).toFixed(2)
+        ),
+      };
+    }
+
+    const installmentAmount =
+      installments.length > 0 ? installments[0].amountDue : 0;
 
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
@@ -1534,9 +2027,7 @@ const handleCheckout = async () => {
             <button
               onClick={() => handleCreditModal(false)}
               className="text-gray-400 hover:text-gray-600 text-2xl"
-            >
-              ×
-            </button>
+            ></button>
           </div>
 
           {/* Información del Crédito */}
@@ -1555,6 +2046,29 @@ const handleCheckout = async () => {
                 </div>
               </div>
             </div>
+            {creditModal.interestType && creditModal.interestValue > 0 && (
+              <div className="mt-4 grid grid-cols-2 gap-4">
+                <div>
+                  <span className="text-sm text-gray-600">
+                    Interés (
+                    {creditModal.interestType === "PORCENTAJE" ? "%" : "$"}):
+                  </span>
+                  <div className="text-lg font-bold text-orange-600">
+                    {creditModal.interestType === "PORCENTAJE"
+                      ? `${creditModal.interestValue}%`
+                      : `$${creditModal.interestValue.toLocaleString()}`}
+                  </div>
+                </div>
+                <div>
+                  <span className="text-sm text-gray-600">
+                    Total con Interés:
+                  </span>
+                  <div className="text-lg font-bold text-purple-600">
+                    ${totalWithInterest.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+            )}
             <div className="mt-4">
               <span className="text-sm text-gray-600">
                 Valor de Cada Cuota:
@@ -1571,56 +2085,208 @@ const handleCheckout = async () => {
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Número de Cuotas
               </label>
-              <select
+              <input
+                type="number"
+                min="1"
+                max="60"
                 value={creditModal.numInstallments}
                 onChange={(e) => {
-                  const numInstallments = Number(e.target.value);
-                  const installments = generateInstallments(
-                    pendingBalance,
-                    numInstallments,
-                    creditModal.firstDueDate
+                  const numInstallments = Math.max(
+                    1,
+                    Number(e.target.value) || 1
                   );
+                  const updatedState = { ...creditModal, numInstallments };
+                  const { installments, totalWithInterest } =
+                    recalculateInstallments(updatedState);
                   setCreditModal((prev) => ({
                     ...prev,
                     numInstallments,
                     installments,
+                    totalWithInterest,
+                  }));
+                }}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Frecuencia de Pago
+              </label>
+              <select
+                value={creditModal.paymentFrequency}
+                onChange={(e) => {
+                  const paymentFrequency = e.target.value;
+                  const updatedState = { ...creditModal, paymentFrequency };
+                  const { installments, totalWithInterest } =
+                    recalculateInstallments(updatedState);
+                  setCreditModal((prev) => ({
+                    ...prev,
+                    paymentFrequency,
+                    installments,
+                    totalWithInterest,
                   }));
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
               >
-                <option value={1}>1 Cuota</option>
-                <option value={2}>2 Cuotas</option>
-                <option value={3}>3 Cuotas</option>
-                <option value={6}>6 Cuotas</option>
-                <option value={12}>12 Cuotas</option>
+                <option value="DIARIO">Diario</option>
+                <option value="SEMANAL">Semanal</option>
+                <option value="QUINCENAL">Quincenal</option>
+                <option value="MENSUAL">Mensual</option>
               </select>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
-                Fecha de Vencimiento Primera Cuota
+                Primera Fecha de Vencimiento
               </label>
               <input
                 type="date"
                 value={creditModal.firstDueDate.toISOString().split("T")[0]}
                 onChange={(e) => {
                   const firstDueDate = new Date(e.target.value);
-                  const installments = generateInstallments(
-                    pendingBalance,
-                    creditModal.numInstallments,
-                    firstDueDate
-                  );
+                  const updatedState = { ...creditModal, firstDueDate };
+                  const { installments, totalWithInterest } =
+                    recalculateInstallments(updatedState);
                   setCreditModal((prev) => ({
                     ...prev,
                     firstDueDate,
                     installments,
+                    totalWithInterest,
                   }));
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                 min={new Date().toISOString().split("T")[0]}
               />
             </div>
+
+            {/* Configuración de Interés */}
+            <div className="border-t pt-4 space-y-3">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Tipo de Interés (Opcional)
+              </label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInterestValueModal({
+                      open: true,
+                      type: "PORCENTAJE",
+                      value:
+                        creditModal.interestType === "PORCENTAJE"
+                          ? creditInterestInput
+                          : "",
+                    });
+                  }}
+                  className={`flex-1 px-4 py-2 rounded-lg border ${
+                    creditModal.interestType === "PORCENTAJE"
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-700 border-gray-300"
+                  }`}
+                >
+                  Porcentaje (%)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInterestValueModal({
+                      open: true,
+                      type: "VALOR",
+                      value:
+                        creditModal.interestType === "VALOR"
+                          ? creditInterestInput
+                          : "",
+                    });
+                  }}
+                  className={`flex-1 px-4 py-2 rounded-lg border ${
+                    creditModal.interestType === "VALOR"
+                      ? "bg-blue-600 text-white border-blue-600"
+                      : "bg-white text-gray-700 border-gray-300"
+                  }`}
+                >
+                  Valor Fijo ($)
+                </button>
+              </div>
+            </div>
           </div>
+
+          {/* Modal pequeño para ingresar valor de interés */}
+          {interestValueModal.open && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+              <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl p-4">
+                <div className="text-lg font-bold mb-3">
+                  {interestValueModal.type === "PORCENTAJE"
+                    ? "Porcentaje de Interés"
+                    : "Valor de Interés"}
+                </div>
+                <input
+                  type="number"
+                  step={interestValueModal.type === "PORCENTAJE" ? "0.1" : "1"}
+                  min="0"
+                  max={
+                    interestValueModal.type === "PORCENTAJE" ? "100" : "999999"
+                  }
+                  value={interestValueModal.value}
+                  onChange={(e) => {
+                    setInterestValueModal((prev) => ({
+                      ...prev,
+                      value: e.target.value,
+                    }));
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg mb-4"
+                  placeholder={
+                    interestValueModal.type === "PORCENTAJE"
+                      ? "Ej: 5.5"
+                      : "Ej: 1000"
+                  }
+                  autoFocus
+                />
+                <div className="flex justify-end gap-2">
+                  <button
+                    className="h-10 px-4 rounded bg-gray-100"
+                    onClick={() => {
+                      setInterestValueModal({
+                        open: false,
+                        type: null,
+                        value: "",
+                      });
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    className="h-10 px-4 rounded bg-blue-600 text-white"
+                    onClick={() => {
+                      // Aplicar el valor
+                      const finalValue = interestValueModal.value || "0";
+                      const updatedState = {
+                        ...creditModal,
+                        interestType: interestValueModal.type,
+                        interestValue: finalValue,
+                      };
+                      const { installments, totalWithInterest } =
+                        recalculateInstallments(updatedState);
+                      setCreditModal((prev) => ({
+                        ...prev,
+                        interestType: interestValueModal.type,
+                        interestValue: finalValue,
+                        installments,
+                        totalWithInterest,
+                      }));
+                      setCreditInterestInput(finalValue);
+                      setInterestValueModal({
+                        open: false,
+                        type: null,
+                        value: "",
+                      });
+                    }}
+                  >
+                    Aplicar
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Vista Previa de Cuotas */}
           <div className="mb-6">

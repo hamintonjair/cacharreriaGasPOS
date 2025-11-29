@@ -19,7 +19,7 @@ export default function AccountsReceivable() {
     currentPage: 1,
     totalPages: 1,
     totalItems: 0,
-    itemsPerPage: 50,
+    itemsPerPage: 20,
   });
 
   const [reminders, setReminders] = useState([]);

@@ -30,9 +30,19 @@ export default function WashingMachines() {
   const [showRentalDetails, setShowRentalDetails] = useState(null);
   const [showExtendHours, setShowExtendHours] = useState(null);
   const [extendHoursForm, setExtendHoursForm] = useState({
-    hours: 1,
+    hours: 0,
     additionalPrice: 0,
   });
+
+  // 🔥 NUEVO: Estado para modal de confirmación de entrega
+  const [showDeliverConfirmModal, setShowDeliverConfirmModal] = useState(false);
+  const [rentalToDeliver, setRentalToDeliver] = useState(null);
+  
+  // 🔥 NUEVO: Estado para fecha de entrega en extensión de amanecida
+  const [deliveryDateTime, setDeliveryDateTime] = useState('');
+  
+  // 🔥 NUEVO: Estado para tipo de extensión seleccionada
+  const [extensionType, setExtensionType] = useState('HOUR'); // 'HOUR' o 'OVERNIGHT'
 
   // Estados generales
   const [error, setError] = useState("");
@@ -251,10 +261,19 @@ export default function WashingMachines() {
   };
 
   // Acciones de alquileres
-  const handleDeliverRental = async (rentalId) => {
+  const handleDeliverRental = (rental) => {
+    // 🔥 MODIFICADO: Mostrar modal de confirmación en lugar de ejecutar directamente
+    setRentalToDeliver(rental);
+    setShowDeliverConfirmModal(true);
+  };
+
+  // 🔥 NUEVO: Función para confirmar la entrega
+  const confirmDeliverRental = async () => {
+    if (!rentalToDeliver) return;
+    
     try {
       const token = localStorage.getItem("auth_token");
-      const response = await fetch(`${API_URL}/rentals/${rentalId}/deliver`, {
+      const response = await fetch(`${API_URL}/rentals/${rentalToDeliver.id}/deliver`, {
         method: "PUT",
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -268,6 +287,8 @@ export default function WashingMachines() {
       await loadActiveRentals();
       await loadMachines(); // Actualizar stock
       setShowRentalDetails(null);
+      setShowDeliverConfirmModal(false);
+      setRentalToDeliver(null);
       setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
       setError(err.message);
@@ -316,15 +337,43 @@ export default function WashingMachines() {
     }
   };
 
-  const handleExtendHours = async () => {
+  // 🔥 NUEVO: Función para extender alquiler (soporta HOUR y OVERNIGHT según selección)
+  const handleExtendRental = async () => {
     if (!showExtendHours) return;
 
     try {
       const token = localStorage.getItem("auth_token");
-      const newScheduledReturnDate = new Date(
-        new Date(showExtendHours.scheduledReturnDate).getTime() +
-          extendHoursForm.hours * 60 * 60 * 1000
-      ).toISOString();
+      
+      let newScheduledReturnDate;
+      let requestBody;
+
+      if (extensionType === 'OVERNIGHT') {
+        // 🔥 PARA AMANECIDA: Usar fecha de entrega y precio adicional
+        if (!deliveryDateTime) {
+          setError('Debes seleccionar una fecha y hora de entrega para extensión por amanecida');
+          setTimeout(() => setError(""), 3000);
+          return;
+        }
+        newScheduledReturnDate = deliveryDateTime;
+        requestBody = {
+          scheduledReturnDate: newScheduledReturnDate,
+          additionalPrice: extendHoursForm.additionalPrice,
+          rentalType: 'OVERNIGHT',
+          isExtension: true
+        };
+      } else {
+        // 🔥 PARA HORAS: Calcular nueva fecha sumando horas
+        newScheduledReturnDate = new Date(
+          new Date(showExtendHours.scheduledReturnDate).getTime() +
+            extendHoursForm.hours * 60 * 60 * 1000
+        ).toISOString();
+        requestBody = {
+          scheduledReturnDate: newScheduledReturnDate,
+          additionalPrice: extendHoursForm.additionalPrice,
+          rentalType: 'HOUR',
+          isExtension: true
+        };
+      }
 
       const response = await fetch(`${API_URL}/rentals/${showExtendHours.id}`, {
         method: "PUT",
@@ -332,21 +381,20 @@ export default function WashingMachines() {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({
-          scheduledReturnDate: newScheduledReturnDate,
-          additionalPrice: extendHoursForm.additionalPrice,
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || "Error al extender horas");
+        throw new Error(errorData.error || "Error al extender alquiler");
       }
 
-      setSuccess("Horas extendidas correctamente");
+      setSuccess("Alquiler extendido correctamente");
       await loadActiveRentals();
       setShowExtendHours(null);
       setExtendHoursForm({ hours: 1, additionalPrice: 0 });
+      setDeliveryDateTime('');
+      setExtensionType('HOUR'); // Resetear a HOUR
       setTimeout(() => setSuccess(""), 3000);
     } catch (err) {
       setError(err.message);
@@ -716,7 +764,7 @@ export default function WashingMachines() {
                         onClick={() => setShowRentalDetails(rental)}
                         className="text-blue-600 hover:text-blue-800 mr-2"
                       >
-                        Ver más 👁️
+                        {rental.rentalType === 'OVERNIGHT' ? 'Amanecida 🌙' : 'Por Hora 👁️'}
                       </button>
                       <button
                         onClick={() => setShowExtendHours(rental)}
@@ -725,7 +773,7 @@ export default function WashingMachines() {
                         Extender ⏰
                       </button>
                       <button
-                        onClick={() => handleDeliverRental(rental.id)}
+                        onClick={() => handleDeliverRental(rental)}
                         className="text-green-600 hover:text-green-800"
                       >
                         Entregado ✅
@@ -785,8 +833,12 @@ export default function WashingMachines() {
                 )}
               </div>
               <div>
+                <span className="font-medium">Tipo de alquiler:</span>{" "}
+                {showRentalDetails.rentalType === 'OVERNIGHT' ? 'Por Amanecida 🌙' : 'Por Hora ⏰'}
+              </div>
+              <div>
                 <span className="font-medium">Horas alquiladas:</span>{" "}
-                {showRentalDetails.hoursRented}
+                {showRentalDetails.rentalType === 'OVERNIGHT' ? '1 (Amanecida)' : showRentalDetails.hoursRented}
               </div>
               <div>
                 <span className="font-medium">Precio total:</span> $
@@ -806,86 +858,169 @@ export default function WashingMachines() {
             <div className="flex justify-end gap-2 mt-6">
               <button
                 onClick={() => setShowRentalDetails(null)}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700"
               >
                 Cerrar
-              </button>
-              <button
-                onClick={() => handleDeliverRental(showRentalDetails.id)}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-              >
-                Marcar como Entregado
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Modal Extender Horas */}
+      {/* Modal Extender Alquiler */}
       {showExtendHours && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
             <h3 className="text-lg font-semibold mb-4">
-              Extender Horas de Alquiler
+              Extender Alquiler
             </h3>
+            
+            {/* 🔥 SELECCIÓN DE TIPO DE EXTENSIÓN */}
+            <div className="mb-4">
+              <label className="block text-sm font-medium mb-2">Tipo de extensión:</label>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setExtensionType('HOUR')}
+                  className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${
+                    extensionType === 'HOUR'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Por Hora ⏰
+                </button>
+                <button
+                  onClick={() => setExtensionType('OVERNIGHT')}
+                  className={`flex-1 py-2 px-3 rounded-lg font-medium transition-colors ${
+                    extensionType === 'OVERNIGHT'
+                      ? 'bg-purple-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  Por Amanecida 🌙
+                </button>
+              </div>
+            </div>
+
             <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Horas adicionales
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={extendHoursForm.hours}
-                  onChange={(e) => {
-                    const hours = parseInt(e.target.value) || 1;
-                    const additionalPrice = showExtendHours.washingMachine
-                      ? Number(showExtendHours.washingMachine.pricePerHour) *
-                        hours
-                      : 0;
-                    setExtendHoursForm({
-                      ...extendHoursForm,
-                      hours,
-                      additionalPrice,
-                    });
-                  }}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">
-                  Precio adicional (calculado automáticamente)
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={extendHoursForm.additionalPrice}
-                  onChange={(e) =>
-                    setExtendHoursForm({
-                      ...extendHoursForm,
-                      additionalPrice: parseFloat(e.target.value),
-                    })
-                  }
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
-                  placeholder="0.00"
-                  readOnly
-                />
-                <div className="text-xs text-gray-500 mt-1">
-                  ${showExtendHours.washingMachine?.pricePerHour || 0} ×{" "}
-                  {extendHoursForm.hours} horas = $
-                  {extendHoursForm.additionalPrice}
+              {/* 🔥 CAMPOS SEGÚN TIPO DE EXTENSIÓN SELECCIONADA */}
+              {extensionType === 'OVERNIGHT' ? (
+                <>
+                  {/* Para AMANECIDA: Mostrar fecha de entrega y precio adicional */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Nueva fecha y hora de entrega
+                    </label>
+                    <input
+                      type="datetime-local"
+                      value={deliveryDateTime}
+                      onChange={(e) => setDeliveryDateTime(e.target.value)}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      min={new Date().toISOString().slice(0, 16)}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Precio adicional por extensión
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={extendHoursForm.additionalPrice}
+                      onChange={(e) =>
+                        setExtendHoursForm({
+                          ...extendHoursForm,
+                          additionalPrice: parseFloat(e.target.value) || 0,
+                        })
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                      placeholder="0.00"
+                    />
+                    <div className="text-xs text-gray-500 mt-1">
+                      Valor adicional por extender la entrega
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* Para HORAS: Mostrar horas adicionales y cálculo automático */}
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Horas adicionales
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      value={extendHoursForm.hours}
+                      onChange={(e) => {
+                        const hours = parseInt(e.target.value) || 1;
+                        const additionalPrice = showExtendHours.washingMachine
+                          ? Number(showExtendHours.washingMachine.pricePerHour) *
+                            hours
+                          : 0;
+                        setExtendHoursForm({
+                          ...extendHoursForm,
+                          hours,
+                          additionalPrice,
+                        });
+                      }}
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">
+                      Precio adicional (calculado automáticamente)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={extendHoursForm.additionalPrice}
+                      onChange={(e) =>
+                        setExtendHoursForm({
+                          ...extendHoursForm,
+                          additionalPrice: parseFloat(e.target.value),
+                        })
+                      }
+                      className="w-full border border-gray-300 rounded-lg px-3 py-2 bg-gray-50"
+                      placeholder="0.00"
+                      
+                    />
+                    <div className="text-xs text-gray-500 mt-1">
+                      ${showExtendHours.washingMachine?.pricePerHour || 0} ×{" "}
+                      {extendHoursForm.hours} horas = $
+                      {extendHoursForm.additionalPrice}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* 🔥 INFORMACIÓN ADICIONAL */}
+              <div className="text-sm text-gray-600 bg-gray-50 p-3 rounded-lg">
+                <div className="mb-2">
+                  <strong>Alquiler actual:</strong> {showExtendHours.rentalType === 'OVERNIGHT' ? 'Por Amanecida 🌙' : 'Por Hora ⏰'}
                 </div>
-              </div>
-              <div className="text-sm text-gray-600">
-                Nueva entrega programada:{" "}
-                {format(
-                  new Date(
-                    new Date(showExtendHours.scheduledReturnDate).getTime() +
-                      extendHoursForm.hours * 60 * 60 * 1000
-                  ),
-                  "dd/MM/yyyy HH:mm",
-                  { locale: es }
-                )}
+                <div className="mb-2">
+                  <strong>Extensión seleccionada:</strong> {extensionType === 'OVERNIGHT' ? 'Por Amanecida 🌙' : 'Por Hora ⏰'}
+                </div>
+                <div className="mb-2">
+                  <strong>Precio base:</strong> ${showExtendHours.baseHourlyPrice || showExtendHours.washingMachine?.pricePerHour || 0}
+                </div>
+                <div>
+                  <strong>Nueva entrega programada:</strong>{" "}
+                  {extensionType === 'OVERNIGHT' ? (
+                    deliveryDateTime ? format(new Date(deliveryDateTime), "dd/MM/yyyy HH:mm", { locale: es }) : "Selecciona fecha"
+                  ) : (
+                    format(
+                      new Date(
+                        new Date(showExtendHours.scheduledReturnDate).getTime() +
+                          extendHoursForm.hours * 60 * 60 * 1000
+                      ),
+                      "dd/MM/yyyy HH:mm",
+                      { locale: es }
+                    )
+                  )}
+                </div>
               </div>
             </div>
             <div className="flex justify-end gap-2 mt-6">
@@ -893,16 +1028,68 @@ export default function WashingMachines() {
                 onClick={() => {
                   setShowExtendHours(null);
                   setExtendHoursForm({ hours: 1, additionalPrice: 0 });
+                  setDeliveryDateTime('');
+                  setExtensionType('HOUR');
                 }}
                 className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
               >
                 Cancelar
               </button>
               <button
-                onClick={handleExtendHours}
+                onClick={handleExtendRental}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
               >
                 Extender
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🔥 NUEVO: Modal de Confirmación de Entrega */}
+      {showDeliverConfirmModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg max-w-md w-full p-6">
+            <h3 className="text-lg font-semibold mb-4">
+              Confirmar Entrega de Lavadora
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <span className="font-medium">Lavadora:</span>{" "}
+                {rentalToDeliver?.washingMachine?.description}
+              </div>
+              <div>
+                <span className="font-medium">Cliente:</span>{" "}
+                {rentalToDeliver?.client?.nombre}
+              </div>
+              <div>
+                <span className="font-medium">Tipo de alquiler:</span>{" "}
+                {rentalToDeliver?.rentalType === 'OVERNIGHT' ? 'Por Amanecida 🌙' : 'Por Hora ⏰'}
+              </div>
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <p className="text-sm text-yellow-800">
+                  ⚠️ ¿Está seguro de que desea marcar este alquiler como entregado?
+                </p>
+                <p className="text-xs text-yellow-600 mt-1">
+                  Esta acción registrará la devolución de la lavadora y actualizará el inventario.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => {
+                  setShowDeliverConfirmModal(false);
+                  setRentalToDeliver(null);
+                }}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDeliverRental}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
+              >
+                Confirmar Entrega ✅
               </button>
             </div>
           </div>
