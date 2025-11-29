@@ -930,12 +930,7 @@ router.post("/sales", auth, async (req, res) => {
       const frontendIvaTotal = Number(req.body.ivaTotal) || 0;
       const frontendTotalCalculated = Number(req.body.total) || 0;
 
-      console.log("🔍 VALORES RECIBIDOS DEL FRONTEND:", {
-        frontendSubtotalNeto: frontendSubtotalNeto.toFixed(2),
-        frontendIvaTotal: frontendIvaTotal.toFixed(2),
-        frontendTotalCalculated: frontendTotalCalculated.toFixed(2),
-        items: items.length,
-      });
+  
 
       for (const it of items) {
         const cantidad = Number(it.cantidad);
@@ -974,13 +969,7 @@ router.post("/sales", auth, async (req, res) => {
             totalItem = Number(it.totalProducto) || subtotal;
             subtotalNetoItem = totalItem - ivaItem;
 
-            console.log("🔥 USANDO VALORES DEL FRONTEND PARA PRODUCTO:", {
-              productId: product.id,
-              taxRate,
-              ivaItem,
-              totalItem,
-              subtotalNetoItem,
-            });
+          
           } else {
             // ❌ FALLBACK: Calcular en backend (no debería ocurrir)
             taxRate = Number(product.taxRate) || 0;
@@ -989,13 +978,7 @@ router.post("/sales", auth, async (req, res) => {
               taxRate > 0 ? (subtotalNetoItem / (1 + taxRate)) * taxRate : 0;
             totalItem = subtotalNetoItem;
 
-            console.log("⚠️ USANDO FALLBACK DEL BACKEND PARA PRODUCTO:", {
-              productId: product.id,
-              taxRate,
-              ivaItem,
-              totalItem,
-              subtotalNetoItem,
-            });
+        
           }
 
           // Acumular totales de la venta
@@ -1096,18 +1079,6 @@ router.post("/sales", auth, async (req, res) => {
       } else if (totalPaidCash < finalTotal) {
         paymentStatus = "PARTIAL"; // Pago parcial
       }
-
-      console.log("🔍 ANÁLISIS DE PAGO:", {
-        payments,
-        cashPayments,
-        totalPaidCash,
-        finalTotal, // ✅ CORRECTO
-        paymentStatus,
-        creditInstallments,
-        "¿Hay creditInstallments?":
-          creditInstallments && creditInstallments.length > 0,
-        "¿PaymentStatus es PENDING?": paymentStatus === "PENDING",
-      });
 
       // Validar que clientId exista si hay crédito
       if (
@@ -3306,11 +3277,9 @@ router.put("/rentals/:id", auth, async (req, res) => {
         ? `${existingRental.notes || ""}\nExtensión por hora: +${additionalPrice} horas` .trim()
         : existingRental.notes;
         
-      console.log("🔥 BACKEND: Nuevas horas:", hoursDiff);
-      console.log("🔥 BACKEND: Nuevo precio:", newRentalPrice);
+      
     } else {
       // 🔥 LÓGICA ANTIGUA (para compatibilidad)
-      console.log("🔥 BACKEND: Usando lógica antigua (compatibilidad)");
       const rentalDate = new Date(existingRental.rentalDate);
       const hoursDiff = Math.ceil(
         (newReturnDate - rentalDate) / (1000 * 60 * 60)
@@ -3319,7 +3288,6 @@ router.put("/rentals/:id", auth, async (req, res) => {
       newHoursRented = hoursDiff;
       notesText = existingRental.notes;
       
-      console.log("🔥 BACKEND: Cálculo antiguo - horas:", hoursDiff, "precio:", newRentalPrice);
     }
 
     // Actualizar alquiler
@@ -3351,9 +3319,7 @@ router.put("/rentals/:id", auth, async (req, res) => {
       },
     });
 
-    console.log("🔥 BACKEND: Alquiler actualizado exitosamente");
-    console.log("🔥 BACKEND: Precio final:", updatedRental.rentalPrice);
-    console.log("🔥 BACKEND: Horas finales:", updatedRental.hoursRented);
+
 
     res.json(updatedRental);
   } catch (error) {

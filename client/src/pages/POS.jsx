@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useRef } from "react";
 import Invoice from "../components/Invoice.jsx";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+const LOGO_URL = import.meta.env.VITE_LOGO_URL;
 
 export default function POS() {
   const token = localStorage.getItem("auth_token");
@@ -36,9 +37,9 @@ export default function POS() {
   const [error, setError] = useState("");
 
   // Estados para alquiler por amanecida
-  const [rentalType, setRentalType] = useState('HOUR'); // 'HOUR' o 'OVERNIGHT'
-  const [overnightAdditionalPrice, setOvernightAdditionalPrice] = useState(0)
-  const [deliveryDateTime, setDeliveryDateTime] = useState('')
+  const [rentalType, setRentalType] = useState("HOUR"); // 'HOUR' o 'OVERNIGHT'
+  const [overnightAdditionalPrice, setOvernightAdditionalPrice] = useState(0);
+  const [deliveryDateTime, setDeliveryDateTime] = useState("");
 
   // Paginación
   const [productsPage, setProductsPage] = useState(1);
@@ -78,342 +79,542 @@ export default function POS() {
   const [company, setCompany] = useState(null);
 
   // Print invoice function
-  const handlePrintInvoice = () => {
-    // Close modal immediately
-    setShowInvoice(false);
+// Print invoice function
+const handlePrintInvoice = () => {
+  // Close modal immediately
+  setShowInvoice(false);
 
-    // Create a new window for printing
-    const printWindow = window.open("", "_blank");
+  // Create a new window for printing
+  const printWindow = window.open("", "_blank");
 
-    if (!printWindow) {
-      toast(
-        "No se pudo abrir la ventana de impresión. Por favor, permite las ventanas emergentes.",
-        "error"
-      );
-      return;
+  if (!printWindow) {
+    toast(
+      "No se pudo abrir la ventana de impresión. Por favor, permite las ventanas emergentes.",
+      "error"
+    );
+    return;
+  }
+
+  // Función segura para formatear fechas (igual que Invoice.jsx)
+  const safeFormatDate = (date) => {
+    if (!date) return 'N/A';
+    try {
+      // Intentar diferentes formatos de fecha
+      let dateObj;
+      
+      // Si es string, intentar parsearlo
+      if (typeof date === 'string') {
+        // Formato ISO: 2025-11-29T09:30:00.000Z
+        if (date.includes('T')) {
+          dateObj = new Date(date);
+        } else {
+          // Formato local: 2025-11-29 09:30:00
+          dateObj = new Date(date.replace(' ', 'T'));
+        }
+      } else {
+        dateObj = new Date(date);
+      }
+      
+      if (isNaN(dateObj.getTime())) return 'N/A';
+      
+      return dateObj.toLocaleString('es-EC', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  // Función para formatear moneda (igual que Invoice.jsx)
+  const formatCurrency = (amount) => {
+    return Number(amount).toLocaleString('es-EC', {
+      style: 'currency',
+      currency: 'USD'
+    })
+  };
+
+  // Calcular totales de IVA (misma lógica que Invoice.jsx)
+  const calculateTotals = () => {
+    // 🔥 Si el servidor envió los valores, usarlos directamente (son más precisos)
+    if (lastSale.subtotalNeto !== undefined && lastSale.ivaTotal !== undefined) {
+      return {
+        subtotalSinIVA: Number(lastSale.subtotalNeto),
+        totalIVA: Number(lastSale.ivaTotal),
+        totalConIVA: Number(lastSale.subtotalNeto) + Number(lastSale.ivaTotal),
+      }
     }
 
-    // Generate the HTML content for the invoice
-    const invoiceHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Factura #${lastSale.id}</title>
-          <style>
-            @page {
-              margin: 20px;
-              size: auto;
+    // Fallback: calcular localmente
+    let subtotalSinIVA = 0
+    let totalIVA = 0
+
+    lastSale.items?.forEach(item => {
+      const precioUnit = Number(item.precio_unit) || 0
+      const cantidad = Number(item.cantidad) || 0
+      const taxRate = Number(item.taxRateApplied) || 0
+      
+      // 🔥 CÁLCULO INDEPENDIENTE DE IVA POR PRODUCTO
+      const ivaUnitario = precioUnit * taxRate
+      const ivaTotalProducto = ivaUnitario * cantidad
+      const subtotalNetoProducto = precioUnit * cantidad - ivaTotalProducto
+      
+      // Acumular totales
+      subtotalSinIVA += subtotalNetoProducto
+      totalIVA += ivaTotalProducto
+    })
+
+    const totalConIVA = subtotalSinIVA + totalIVA
+
+    return { 
+      subtotalSinIVA, 
+      totalIVA, 
+      totalConIVA
+    }
+  };
+
+  // Calcular información de crédito (misma lógica que Invoice.jsx)
+  const getCreditInfo = () => {
+    const creditPayment = lastSale.payments?.find(p => p.paymentMethod === 'CREDIT')
+    if (!creditPayment) return null
+
+    const cashPayments = lastSale.payments?.filter(p => p.paymentMethod !== 'CREDIT') || []
+    const totalCash = cashPayments.reduce((sum, p) => sum + Number(p.amount), 0)
+    
+    const pendingBalance = Number(lastSale.total) - totalCash
+    const interestAmount = Number(lastSale.creditInterestAmount || 0)
+    const totalCredit = pendingBalance + interestAmount
+
+    return {
+      pendingBalance,
+      interestAmount,
+      interestType: lastSale.creditInterestType,
+      totalCredit,
+      installments: lastSale.creditInstallments || []
+    }
+  };
+
+  const { subtotalSinIVA, totalIVA, totalConIVA } = calculateTotals();
+  const creditInfo = getCreditInfo();
+
+  // Generate the HTML content for the invoice (igual diseño que Invoice.jsx)
+  const invoiceHTML = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <title>Factura #${lastSale.id}</title>
+        <style>
+          @page {
+            margin: 20px;
+            size: auto;
+          }
+          body {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            margin: 0;
+            padding: 20px;
+            line-height: 1.4;
+            background: white;
+          }
+          .max-w-2xl {
+            max-width: 800px;
+            margin: 0 auto;
+          }
+          .bg-white {
+            background: white;
+          }
+          .border-b-2 {
+            border-bottom: 2px solid;
+          }
+          .border-gray-900 {
+            border-color: #111827;
+          }
+          .pb-4 {
+            padding-bottom: 16px;
+          }
+          .mb-4 {
+            margin-bottom: 16px;
+          }
+          .flex {
+            display: flex;
+          }
+          .items-start {
+            align-items: flex-start;
+          }
+          .justify-between {
+            justify-content: space-between;
+          }
+          .flex-1 {
+            flex: 1;
+          }
+          .text-2xl {
+            font-size: 24px;
+          }
+          .font-bold {
+            font-weight: bold;
+          }
+          .text-sm {
+            font-size: 14px;
+          }
+          .text-gray-600 {
+            color: #4b5563;
+          }
+          .space-y-1 > div + div {
+            margin-top: 4px;
+          }
+          .text-right {
+            text-align: right;
+          }
+          .text-lg {
+            font-size: 18px;
+          }
+          .text-gray-700 {
+            color: #374151;
+          }
+          .font-semibold {
+            font-weight: 600;
+          }
+          .mb-1 {
+            margin-bottom: 4px;
+          }
+          .text-xs {
+            font-size: 12px;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 16px;
+          }
+          th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+          }
+          th {
+            font-weight: 600;
+            background-color: #f9fafb;
+            font-size: 12px;
+            text-transform: uppercase;
+          }
+          .text-center {
+            text-align: center;
+          }
+          .text-right {
+            text-align: right;
+          }
+          .border-gray-200 {
+            border-color: #e5e7eb;
+          }
+          .bg-gray-50 {
+            background-color: #f9fafb;
+          }
+          .p-3 {
+            padding: 12px;
+          }
+          .rounded {
+            border-radius: 8px;
+          }
+          .mb-2 {
+            margin-bottom: 8px;
+          }
+          .py-2 {
+            padding-top: 8px;
+            padding-bottom: 8px;
+          }
+          .text-orange-600 {
+            color: #ea580c;
+          }
+          .border-t-2 {
+            border-top: 2px solid;
+          }
+          .border-gray-300 {
+            border-color: #d1d5db;
+          }
+          .py-3 {
+            padding-top: 12px;
+            padding-bottom: 12px;
+          }
+          .text-green-700 {
+            color: #15803d;
+          }
+          .bg-blue-50 {
+            background-color: #eff6ff;
+          }
+          .text-blue-700 {
+            color: #1d4ed8;
+          }
+          .text-blue-600 {
+            color: #2563eb;
+          }
+          .border-blue-200 {
+            border-color: #bfdbfe;
+          }
+          .mt-3 {
+            margin-top: 12px;
+          }
+          .pt-3 {
+            padding-top: 12px;
+          }
+          .border-t {
+            border-top: 1px solid;
+          }
+          .text-xs {
+            font-size: 11px;
+          }
+          .space-y-1 > div + div {
+            margin-top: 4px;
+          }
+          .border-t {
+            border-top: 1px solid;
+          }
+          .border-gray-300 {
+            border-color: #d1d5db;
+          }
+          .pt-4 {
+            padding-top: 16px;
+          }
+          .mt-4 {
+            margin-top: 16px;
+          }
+          .text-center {
+            text-align: center;
+          }
+          @media print {
+            body { margin: 0; padding: 15px; }
+            .no-print { display: none; }
+            * {
+              -webkit-print-color-adjust: exact !important;
+              color-adjust: exact !important;
             }
-            body {
-              font-family: Arial, sans-serif;
-              font-size: 12px;
-              margin: 0;
-              padding: 20px;
-              line-height: 1.4;
-            }
-            .header {
-              display: flex;
-              justify-content: space-between;
-              align-items: flex-start;
-              margin-bottom: 20px;
-              border-bottom: 2px solid #000;
-              padding-bottom: 15px;
-            }
-            .company-info {
-              flex: 1;
-            }
-            .company-info h1 {
-              margin: 0 0 10px 0;
-              font-size: 18px;
-            }
-            .company-info .details {
-              font-size: 11px;
-              color: #666;
-              line-height: 1.2;
-            }
-            .invoice-number {
-              text-align: right;
-            }
-            .invoice-number h2 {
-              margin: 0;
-              font-size: 16px;
-            }
-            .invoice-number .number {
-              font-size: 12px;
-              color: #666;
-            }
-            .sale-info {
-              display: grid;
-              grid-template-columns: 1fr 1fr;
-              gap: 10px;
-              margin-bottom: 20px;
-              font-size: 11px;
-            }
-            .sale-info div {
-              margin-bottom: 5px;
-            }
-            .sale-info .label {
-              font-weight: bold;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-bottom: 20px;
-              font-size: 10px;
-            }
-            th, td {
-              padding: 5px;
-              text-align: left;
-              border-bottom: 1px solid #ddd;
-            }
-            th {
-              font-weight: bold;
-              background-color: #f5f5f5;
-            }
-            .text-right {
-              text-align: right;
-            }
-            .text-center {
-              text-align: center;
-            }
-            .totals {
-              border-top: 2px solid #000;
-              padding-top: 10px;
-              margin-bottom: 20px;
-            }
-            .totals .total-row {
-              display: flex;
-              justify-content: space-between;
-              margin-bottom: 5px;
-              font-size: 12px;
-            }
-            .totals .total-row.grand-total {
-              font-weight: bold;
-              font-size: 14px;
-            }
-            .totals .total-row.change {
-              color: #28a745;
-            }
-            .footer {
-              text-align: center;
-              font-size: 10px;
-              color: #666;
-              margin-top: 30px;
-              border-top: 1px solid #ddd;
-              padding-top: 10px;
-            }
-            @media print {
-              body { margin: 0; padding: 15px; }
-              .no-print { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="company-info">
-              ${
-                company.logo_url
-                  ? `<img src="http://localhost:5000${company.logo_url}" style="max-height: 60px; margin-bottom: 10px;" />`
-                  : ""
-              }
-              <h1>${company.name}</h1>
-              <div class="details">
-                <div>RUC/NIT: ${company.tax_id}</div>
-                <div>${company.address}</div>
-                <div>Tel: ${company.phone}</div>
-                ${company.email ? `<div>Email: ${company.email}</div>` : ""}
+          }
+        </style>
+      </head>
+      <body>
+        <div class="max-w-2xl bg-white">
+          <div class="border-b-2 border-gray-900 pb-4 mb-4">
+            <div class="flex items-start justify-between">
+              <div class="flex-1">
+                ${
+                  company.logo_url
+                    ? `<img src="${LOGO_URL || 'http://localhost:5000'}${company.logo_url}" style="max-height: 60px; margin-bottom: 10px;" />`
+                    : ""
+                }
+                <h1 class="text-2xl font-bold">${company.name}</h1>
+                <div class="text-sm text-gray-600 space-y-1">
+                  <div>RUC/NIT: ${company.tax_id}</div>
+                  <div>${company.address}</div>
+                  <div>Tel: ${company.phone}</div>
+                  ${company.email ? `<div>Email: ${company.email}</div>` : ""}
+                </div>
+              </div>
+              <div class="text-right">
+                <div class="text-sm text-gray-600 mb-2">FACTURA</div>
+                <div class="text-lg font-bold">#${lastSale.id}</div>
+                <div class="text-sm text-gray-600 mt-2">
+                  <div>Fecha: ${safeFormatDate(lastSale.fecha || lastSale.createdAt)}</div>
+                </div>
               </div>
             </div>
-            <div class="invoice-number">
-              <h2>FACTURA</h2>
-              <div class="number">No. #${String(lastSale.id).padStart(
-                6,
-                "0"
-              )}</div>
+          </div>
+
+          <div class="mb-4">
+            <div class="text-sm font-semibold text-gray-700 mb-1">CLIENTE:</div>
+            <div class="text-sm">
+              ${
+                selectedClient
+                  ? `
+                <div class="font-medium">${selectedClient.nombre}</div>
+                ${selectedClient.identificacion ? `<div class="text-gray-600">CI/RUC: ${selectedClient.identificacion}</div>` : ""}
+                ${selectedClient.direccion ? `<div class="text-gray-600">Dirección: ${selectedClient.direccion}</div>` : ""}
+                ${selectedClient.telefono ? `<div class="text-gray-600">Tel: ${selectedClient.telefono}</div>` : ""}
+              `
+                  : `<div class="text-gray-600">Cliente general</div>`
+              }
             </div>
           </div>
-          
-          <div class="sale-info">
-            <div>
-              <div class="label">Fecha:</div>
-              <div>${new Date(lastSale.fecha).toLocaleString("es-EC")}</div>
-            </div>
-            <div>
-              <div class="label">Estado de Pago:</div>
-              <div>${
-                lastSale.paymentStatus === "PAID"
-                  ? "PAGADO"
-                  : lastSale.paymentStatus === "PENDING"
-                  ? "CRÉDITO"
-                  : "PARCIAL"
-              }</div>
-            </div>
-            ${
-              selectedClient
-                ? `
-              <div>
-                <div class="label">Cliente:</div>
-                <div>${selectedClient.nombre}</div>
+
+          <div class="mb-4">
+            <table>
+              <thead>
+                <tr class="border-b border-gray-200">
+                  <th>Producto</th>
+                  <th class="text-center">Cant.</th>
+                  <th class="text-right">P. Unit.</th>
+                  <th class="text-right">IVA</th>
+                  <th class="text-right">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${lastSale.items
+                  ?.map(
+                    (item) => `
+                    <tr class="border-b border-gray-200">
+                      <td>
+                        <div class="font-medium">
+                          ${item.product?.nombre || item.gasType?.nombre || 'Producto'}
+                        </div>
+                        ${item.recibio_envase ? `<div class="text-xs text-green-600">Envase recibido</div>` : ""}
+                      </td>
+                      <td class="text-center">${item.cantidad}</td>
+                      <td class="text-right">${formatCurrency(item.precio_unit)}</td>
+                      <td class="text-right">
+                        ${Number(item.taxRateApplied) > 0 
+                          ? `${(Number(item.taxRateApplied) * 100).toFixed(1)}%` 
+                          : '0%'
+                        }
+                      </td>
+                      <td class="text-right font-medium">
+                        ${formatCurrency(item.subtotal)}
+                      </td>
+                    </tr>
+                  `
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="mb-4">
+            <div style="display: flex; justify-content: flex-end;">
+              <div style="width: 288px;">
+                {/* Desglose de IVA */}
+                <div class="bg-gray-50 p-3 rounded mb-2">
+                  <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+                    <span style="color: #374151;">Subtotal sin IVA:</span>
+                    <span class="font-semibold">${formatCurrency(subtotalSinIVA)}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+                    <span style="color: #374151;">IVA Total:</span>
+                    <span class="font-semibold text-orange-600">+${formatCurrency(totalIVA)}</span>
+                  </div>
+                  
+                  <div style="display: flex; justify-content: space-between; padding: 12px 0; border-top: 2px solid #d1d5db; font-weight: bold; font-size: 18px;">
+                    <span>TOTAL:</span>
+                    <span class="text-green-700">${formatCurrency(totalConIVA)}</span>
+                  </div>
+                </div>
+                
                 ${
-                  selectedClient.identificacion
-                    ? `<div style="font-size: 10px; color: #666;">CI/RUC: ${selectedClient.identificacion}</div>`
+                  creditInfo
+                    ? `
+                <div class="bg-blue-50 p-3 rounded">
+                  <div class="text-sm font-semibold text-blue-700 mb-3">DETALLE DE CRÉDITO:</div>
+                  
+                  {/* Saldo pendiente */}
+                  <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px;">
+                    <span style="color: #374151;">Saldo pendiente:</span>
+                    <span class="font-semibold">${formatCurrency(creditInfo.pendingBalance)}</span>
+                  </div>
+                  
+                  {/* Interés */}
+                  ${
+                    creditInfo.interestAmount > 0
+                      ? `
+                    <div style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 14px;">
+                      <span style="color: #374151;">
+                        ${creditInfo.interestType === 'PORCENTAJE' 
+                          ? `Interés (${creditInfo.interestAmount}%):` 
+                          : 'Interés:'
+                        }
+                      </span>
+                      <span class="font-semibold text-orange-600">
+                        +${formatCurrency(creditInfo.interestAmount)}
+                      </span>
+                    </div>
+                  `
+                      : ""
+                  }
+        
+                  {/* Total crédito */}
+                  <div style="display: flex; justify-content: space-between; padding: 8px 0; border-top: 1px solid #bfdbfe; font-weight: bold; color: #1d4ed8;">
+                    <span>Total crédito:</span>
+                    <span>${formatCurrency(creditInfo.totalCredit)}</span>
+                  </div>
+                  
+                  {/* Plan de pagos */}
+                  ${
+                    creditInfo.installments.length > 0
+                      ? `
+                    <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #bfdbfe;">
+                      <div class="text-xs font-semibold text-blue-600 mb-2">Plan de pagos (${creditInfo.installments.length} cuotas):</div>
+                      <div class="space-y-1">
+                        ${creditInfo.installments
+                          .map(
+                            (installment, index) => `
+                            <div style="display: flex; justify-content: space-between; font-size: 11px; color: #4b5563;">
+                              <span>Cuota ${installment.installmentNumber} (${safeFormatDate(installment.dueDate)}):</span>
+                              <span class="font-semibold">${formatCurrency(installment.amountDue)}</span>
+                            </div>
+                          `
+                          )
+                          .join("")}
+                      </div>
+                    </div>
+                  `
+                      : ""
+                  }
+                </div>
+              `
                     : ""
                 }
               </div>
-            `
-                : ""
-            }
-            <div>
-              <div class="label">Vendedor:</div>
-              <div>${lastSale.user?.nombre || "N/A"}</div>
             </div>
           </div>
-          
-          <table>
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th class="text-center">Cant.</th>
-                <th class="text-right">P. Unit.</th>
-                <th class="text-right">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${lastSale.items
+
+          <div class="mb-4">
+            <div class="text-sm font-semibold text-gray-700 mb-2">FORMA DE PAGO:</div>
+            <div class="text-sm space-y-1">
+              ${lastSale.payments
                 ?.map(
-                  (item) => `
-                <tr>
-                  <td>
-                    <div>${item.product?.nombre || item.gasType?.nombre}</div>
-                    ${
-                      item.gasType
-                        ? `<div style="font-size: 9px; color: #666;">${
-                            item.recibio_envase
-                              ? "Con intercambio"
-                              : "Sin intercambio"
-                          }</div>`
-                        : ""
-                    }
-                  </td>
-                  <td class="text-center">${item.cantidad}</td>
-                  <td class="text-right">$${Number(
-                    item.precio_unit
-                  ).toLocaleString("es-EC")}</td>
-                  <td class="text-right font-bold">$${Number(
-                    item.subtotal
-                  ).toLocaleString("es-EC")}</td>
-                </tr>
-              `
+                  (payment, index) => `
+                  <div style="display: flex; justify-content: space-between;">
+                    <span>${
+                      payment.paymentMethod === 'CASH' 
+                        ? 'Efectivo' 
+                        : payment.paymentMethod === 'CREDIT_CARD' 
+                        ? 'Tarjeta' 
+                        : payment.paymentMethod === 'TRANSFER' 
+                        ? 'Transferencia' 
+                        : 'Crédito'
+                    }:</span>
+                    <span>${formatCurrency(payment.amount)}</span>
+                  </div>
+                `
                 )
                 .join("")}
-            </tbody>
-          </table>
-          
-          ${
-            lastSale.creditInstallments &&
-            lastSale.creditInstallments.length > 0
-              ? `
-<div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 15px;">
-  <div style="text-align: center; font-weight: bold; margin-bottom: 10px; background-color: #f5f5f5; padding: 8px;">
-    CUOTAS DE CRÉDITO
-  </div>
-  ${lastSale.creditInstallments
-    .map(
-      (installment) => `
-    <div style="display: flex; justify-content: space-between; font-size: 10px; padding: 3px 0; border-bottom: 1px solid #eee;">
-      <span style="flex: 1;">
-        Cuota ${installment.installmentNumber} - 
-        ${new Date(installment.dueDate).toLocaleDateString("es-EC", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        })}
-      </span>
-      <span style="font-weight: bold; text-align: right; min-width: 80px;">
-        $${Number(installment.amountDue).toLocaleString("es-EC")}
-      </span>
-    </div>
-  `
-    )
-    .join("")}
-  <div style="margin-top: 8px; padding-top: 5px; border-top: 1px solid #ddd; display: flex; justify-content: space-between; font-weight: bold; font-size: 11px;">
-    <span>Total Crédito:</span>
-    <span>
-      $${lastSale.creditInstallments
-        .reduce((sum, installment) => sum + Number(installment.amountDue), 0)
-        .toLocaleString("es-EC")}
-    </span>
-  </div>
-</div>
-`
-              : ""
-          }
-
-          <div class="totals">
-            <div class="total-row grand-total">
-              <span>TOTAL:</span>
-              <span>$${Number(lastSale.total).toLocaleString("es-EC")}</span>
             </div>
-            
-
-            
-            
-${
-  lastSale.payments && lastSale.payments.length > 0
-    ? lastSale.payments
-        .map(
-          (payment, index) => `
-          <div class="total-row">
-            <span>Pago ${index + 1} (${payment.paymentMethod}):</span>
-            <span>$${Number(payment.amount).toLocaleString("es-EC")}</span>
           </div>
-        `
-        )
-        .join("")
-    : ""
-}
 
-${
-  lastSale.paymentStatus === "PAID"
-    ? ""
-    : `
-        <div class="total-row" style="color: #dc2626;">
-          <span>Saldo Pendiente:</span>
-          <span>$${Number(lastSale.total - lastSale.totalPaid).toLocaleString(
-            "es-EC"
-          )}</span>
+          <div style="border-top: 1px solid #d1d5db; padding-top: 16px; margin-top: 16px; text-align: center; font-size: 12px; color: #4b5563;">
+            <div>Gracias por su compra</div>
+            <div style="margin-top: 4px;">Esta factura es un documento válido para fines fiscales</div>
+          </div>
         </div>
-      `
-}
-          </div>
-          
-          <div class="footer">
-            <div>¡Gracias por su compra!</div>
-            <div style="margin-top: 5px;">Este documento no tiene validez fiscal</div>
-          </div>
-          
-          <script>
-            window.onload = function() {
+        
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+              window.onafterprint = function() {
+                window.close();
+              };
+              // Fallback for browsers that don't support onafterprint
               setTimeout(function() {
-                window.print();
-                window.onafterprint = function() {
-                  window.close();
-                };
-                // Fallback for browsers that don't support onafterprint
-                setTimeout(function() {
-                  window.close();
-                }, 1000);
-              }, 500);
-            };
-          </script>
-        </body>
-      </html>
-    `;
+                window.close();
+              }, 1000);
+            }, 500);
+          };
+        </script>
+      </body>
+    </html>
+  `;
 
-    // Write the HTML to the new window
-    printWindow.document.write(invoiceHTML);
-    printWindow.document.close();
-  };
+  printWindow.document.write(invoiceHTML);
+  printWindow.document.close();
+};
 
   // Toast helper
   const toast = (message, type = "info", duration = 3000) => {
@@ -529,31 +730,44 @@ ${
       toast("Debes seleccionar una lavadora", "error");
       return;
     }
-    if (rentalType === 'HOUR' && rentalForm.hoursRented < 1) {
+    if (rentalType === "HOUR" && rentalForm.hoursRented < 1) {
       toast("Las horas deben ser mayor a 0", "error");
       return;
     }
-    if (rentalType === 'OVERNIGHT' && !deliveryDateTime) {
-      toast("Debes especificar la fecha y hora de entrega para alquiler por amanecida", "error");
+    if (rentalType === "OVERNIGHT" && !deliveryDateTime) {
+      toast(
+        "Debes especificar la fecha y hora de entrega para alquiler por amanecida",
+        "error"
+      );
       return;
     }
 
     setRentalLoading(true);
     try {
       // 🔥 CORRECCIÓN: Para OVERNIGHT, enviar hoursRented = 1 para evitar cálculo incorrecto
-      const hoursToSend = rentalType === 'OVERNIGHT' ? 1 : rentalForm.hoursRented;
-      const scheduledReturnToSend = rentalType === 'OVERNIGHT' ? deliveryDateTime : rentalForm.scheduledReturnDate;
+      const hoursToSend =
+        rentalType === "OVERNIGHT" ? 1 : rentalForm.hoursRented;
+      const scheduledReturnToSend =
+        rentalType === "OVERNIGHT"
+          ? deliveryDateTime
+          : rentalForm.scheduledReturnDate;
 
       // 🔥 NUEVO: Calcular el precio final correcto según el tipo de alquiler
-      const machine = washingMachines.find(m => m.id === Number(rentalForm.washingMachineId));
+      const machine = washingMachines.find(
+        (m) => m.id === Number(rentalForm.washingMachineId)
+      );
       let finalPrice = 0;
-      
-      if (rentalType === 'HOUR') {
+
+      if (rentalType === "HOUR") {
         // Por Hora: precio base × horas
-        finalPrice = machine ? Number(machine.pricePerHour) * rentalForm.hoursRented : 0;
+        finalPrice = machine
+          ? Number(machine.pricePerHour) * rentalForm.hoursRented
+          : 0;
       } else {
         // Por Amanecida: precio base + adicional
-        finalPrice = machine ? Number(machine.pricePerHour) + overnightAdditionalPrice : 0;
+        finalPrice = machine
+          ? Number(machine.pricePerHour) + overnightAdditionalPrice
+          : 0;
       }
 
       const rentalData = {
@@ -565,18 +779,20 @@ ${
         totalPrice: finalPrice,
         // 🔥 NUEVO: Agregar campos especiales para identificar alquiler por amanecida
         rentalType: rentalType,
-        ...(rentalType === 'OVERNIGHT' && {
+        ...(rentalType === "OVERNIGHT" && {
           overnightAdditionalPrice: overnightAdditionalPrice,
-          baseHourlyPrice: washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour
-        })
+          baseHourlyPrice: washingMachines.find(
+            (m) => m.id === Number(rentalForm.washingMachineId)
+          )?.pricePerHour,
+        }),
       };
 
       // 🔥 DEBUG: Mostrar qué se está enviando al backend
-      console.log('🚀 ENVIANDO ALQUILER:', {
+      console.log("🚀 ENVIANDO ALQUILER:", {
         rentalType,
         hoursToSend,
         finalPrice,
-        rentalData
+        rentalData,
       });
 
       const res = await fetch(`${API_URL}/rentals`, {
@@ -602,9 +818,9 @@ ${
         rentalPrice: 0,
         scheduledReturnDate: calculateReturnDate(1),
       });
-      setRentalType('HOUR');
+      setRentalType("HOUR");
       setOvernightAdditionalPrice(0);
-      setDeliveryDateTime('');
+      setDeliveryDateTime("");
 
       // Recargar lavadoras disponibles
       await fetchWashingMachines();
@@ -977,12 +1193,14 @@ ${
             ? { gasTypeId: i.id, recibio_envase: Boolean(i.recibio_envase) }
             : {}),
           ...(i.type === "washing_machine"
-            ? { 
+            ? {
                 washingMachineId: i.id,
                 horasAlquiler: i.horasAlquiler,
                 rentalType: i.rentalType,
                 scheduledReturnDate: i.scheduledReturnDate,
-                ...(i.overnightAdditionalPrice && { overnightAdditionalPrice: i.overnightAdditionalPrice })
+                ...(i.overnightAdditionalPrice && {
+                  overnightAdditionalPrice: i.overnightAdditionalPrice,
+                }),
               }
             : {}),
           cantidad: i.cantidad,
@@ -1270,18 +1488,18 @@ ${
               <div className="grid grid-cols-2 gap-3">
                 <button
                   onClick={() => {
-                    setRentalType('HOUR');
+                    setRentalType("HOUR");
                     // Resetear a valores por defecto para alquiler por hora
-                    setRentalForm(prev => ({
+                    setRentalForm((prev) => ({
                       ...prev,
                       hoursRented: 1,
-                      scheduledReturnDate: calculateReturnDate(1)
+                      scheduledReturnDate: calculateReturnDate(1),
                     }));
                   }}
                   className={`p-3 border-2 rounded-lg transition-colors ${
-                    rentalType === 'HOUR'
-                      ? 'border-blue-500 bg-blue-50 text-blue-700'
-                      : 'border-gray-200 hover:border-gray-300'
+                    rentalType === "HOUR"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
                   <div className="text-center">
@@ -1289,21 +1507,21 @@ ${
                     <div className="text-xs text-gray-500">Precio por hora</div>
                   </div>
                 </button>
-                
+
                 <button
                   onClick={() => {
-                    setRentalType('OVERNIGHT');
+                    setRentalType("OVERNIGHT");
                     // Resetear para alquiler por amanecida
-                    setRentalForm(prev => ({
+                    setRentalForm((prev) => ({
                       ...prev,
                       hoursRented: 999, // 🔥 Indicador especial
-                      scheduledReturnDate: deliveryDateTime || ''
+                      scheduledReturnDate: deliveryDateTime || "",
                     }));
                   }}
                   className={`p-3 border-2 rounded-lg transition-colors ${
-                    rentalType === 'OVERNIGHT'
-                      ? 'border-purple-500 bg-purple-50 text-purple-700'
-                      : 'border-gray-200 hover:border-gray-300'
+                    rentalType === "OVERNIGHT"
+                      ? "border-purple-500 bg-purple-50 text-purple-700"
+                      : "border-gray-200 hover:border-gray-300"
                   }`}
                 >
                   <div className="text-center">
@@ -1325,10 +1543,10 @@ ${
                   const machine = washingMachines.find(
                     (m) => m.id === Number(e.target.value)
                   );
-                  
+
                   let newRentalPrice = 0;
-                  
-                  if (rentalType === 'HOUR') {
+
+                  if (rentalType === "HOUR") {
                     newRentalPrice = machine
                       ? Number(machine.pricePerHour) * rentalForm.hoursRented
                       : 0;
@@ -1338,14 +1556,15 @@ ${
                       ? Number(machine.pricePerHour) + overnightAdditionalPrice
                       : 0;
                   }
-                  
+
                   setRentalForm({
                     ...rentalForm,
                     washingMachineId: e.target.value,
                     rentalPrice: newRentalPrice,
-                    scheduledReturnDate: rentalType === 'HOUR' 
-                      ? calculateReturnDate(rentalForm.hoursRented)
-                      : deliveryDateTime,
+                    scheduledReturnDate:
+                      rentalType === "HOUR"
+                        ? calculateReturnDate(rentalForm.hoursRented)
+                        : deliveryDateTime,
                   });
                 }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500"
@@ -1362,7 +1581,7 @@ ${
             </div>
 
             {/* 🕐 Horas a Alquilar (solo para HOUR) */}
-            {rentalType === 'HOUR' && (
+            {rentalType === "HOUR" && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Horas a Alquilar:
@@ -1392,7 +1611,7 @@ ${
             )}
 
             {/* 🔥 NUEVO: Precio Adicional Amanecida (solo para OVERNIGHT) */}
-            {rentalType === 'OVERNIGHT' && (
+            {rentalType === "OVERNIGHT" && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Precio Amanecida (Adicional):
@@ -1401,12 +1620,17 @@ ${
                   type="number"
                   min="0"
                   step="0.01"
-                  value={overnightAdditionalPrice === 0 ? "" : overnightAdditionalPrice}
+                  value={
+                    overnightAdditionalPrice === 0
+                      ? ""
+                      : overnightAdditionalPrice
+                  }
                   onChange={(e) => {
                     const value = e.target.value;
-                    const additionalPrice = value === "" ? 0 : parseFloat(value) || 0;
+                    const additionalPrice =
+                      value === "" ? 0 : parseFloat(value) || 0;
                     setOvernightAdditionalPrice(additionalPrice);
-                    
+
                     // Recalcular precio total
                     const machine = washingMachines.find(
                       (m) => m.id === Number(rentalForm.washingMachineId)
@@ -1414,10 +1638,10 @@ ${
                     const newRentalPrice = machine
                       ? Number(machine.pricePerHour) + additionalPrice
                       : 0;
-                    
-                    setRentalForm(prev => ({
+
+                    setRentalForm((prev) => ({
                       ...prev,
-                      rentalPrice: newRentalPrice
+                      rentalPrice: newRentalPrice,
                     }));
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
@@ -1430,7 +1654,7 @@ ${
             )}
 
             {/* 🔥 NUEVO: Fecha y Hora de Entrega (solo para OVERNIGHT) */}
-            {rentalType === 'OVERNIGHT' && (
+            {rentalType === "OVERNIGHT" && (
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-2">
                   Fecha y Hora de Entrega Final:
@@ -1440,9 +1664,9 @@ ${
                   value={deliveryDateTime}
                   onChange={(e) => {
                     setDeliveryDateTime(e.target.value);
-                    setRentalForm(prev => ({
+                    setRentalForm((prev) => ({
                       ...prev,
-                      scheduledReturnDate: e.target.value
+                      scheduledReturnDate: e.target.value,
                     }));
                   }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
@@ -1454,12 +1678,15 @@ ${
             <div className="bg-gray-50 p-4 rounded-lg mb-4">
               <h4 className="text-sm font-bold text-gray-700 mb-2">Resumen:</h4>
               <div className="space-y-1 text-sm">
-                {rentalType === 'HOUR' ? (
+                {rentalType === "HOUR" ? (
                   <>
                     <div className="flex justify-between">
                       <span>Precio por hora:</span>
                       <span>
-                        ${washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour || 0}
+                        $
+                        {washingMachines.find(
+                          (m) => m.id === Number(rentalForm.washingMachineId)
+                        )?.pricePerHour || 0}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1476,7 +1703,10 @@ ${
                     <div className="flex justify-between">
                       <span>Precio base por hora:</span>
                       <span>
-                        ${washingMachines.find(m => m.id === Number(rentalForm.washingMachineId))?.pricePerHour || 0}
+                        $
+                        {washingMachines.find(
+                          (m) => m.id === Number(rentalForm.washingMachineId)
+                        )?.pricePerHour || 0}
                       </span>
                     </div>
                     <div className="flex justify-between">
@@ -1563,7 +1793,11 @@ ${
                 <div className="font-semibold">{i.nombre}</div>
                 <div className="text-sm text-gray-500">
                   ${Number(i.precio).toLocaleString()} ·{" "}
-                  {i.type === "gas" ? "Gas" : i.type === "washing_machine" ? "Lavadora" : "Producto"}
+                  {i.type === "gas"
+                    ? "Gas"
+                    : i.type === "washing_machine"
+                    ? "Lavadora"
+                    : "Producto"}
                 </div>
                 {i.type === "gas" && (
                   <div className="text-xs text-gray-500">
@@ -1574,13 +1808,13 @@ ${
                 )}
                 {i.type === "washing_machine" && (
                   <div className="text-xs text-gray-500">
-                    {i.rentalType === 'OVERNIGHT' 
-                      ? 'Alquiler por Amanecida'
-                      : `${i.horasAlquiler} hora(s) a $${i.pricePerHour}/hora`
-                    }
+                    {i.rentalType === "OVERNIGHT"
+                      ? "Alquiler por Amanecida"
+                      : `${i.horasAlquiler} hora(s) a $${i.pricePerHour}/hora`}
                     {i.scheduledReturnDate && (
                       <div className="text-xs text-purple-600">
-                        Entrega: {new Date(i.scheduledReturnDate).toLocaleString()}
+                        Entrega:{" "}
+                        {new Date(i.scheduledReturnDate).toLocaleString()}
                       </div>
                     )}
                   </div>
@@ -1644,7 +1878,6 @@ ${
         ))}
       </div>
       <div className="border-t bg-white p-3 sm:p-4">
-        {/* Desglose de IVA */}
         <div className="mb-4 space-y-2 pb-4 border-b">
           <div className="flex items-center justify-between text-sm">
             <div className="text-gray-600">Subtotal Neto:</div>

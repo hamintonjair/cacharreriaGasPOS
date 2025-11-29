@@ -5,16 +5,40 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api'
 export default function Invoice({ sale, company, client, showPrint = true }) {
   if (!sale || !company) return null
 
-  const formatDate = (date) => {
-    return new Date(date).toLocaleString('es-EC', {
+const formatDate = (date) => {
+  if (!date) return 'N/A';
+  try {
+    // Intentar diferentes formatos de fecha
+    let dateObj;
+    
+    // Si es string, intentar parsearlo
+    if (typeof date === 'string') {
+      // Formato ISO: 2025-11-29T09:30:00.000Z
+      if (date.includes('T')) {
+        dateObj = new Date(date);
+      } else {
+        // Formato local: 2025-11-29 09:30:00
+        dateObj = new Date(date.replace(' ', 'T'));
+      }
+    } else {
+      dateObj = new Date(date);
+    }
+        
+    if (isNaN(dateObj.getTime())) return 'N/A';
+    
+    const result = dateObj.toLocaleString('es-EC', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit'
-    })
+    });
+    
+    return result;
+  } catch (error) {
+    return 'N/A';
   }
-
+}
   const formatCurrency = (amount) => {
     return Number(amount).toLocaleString('es-EC', {
       style: 'currency',
@@ -22,9 +46,6 @@ export default function Invoice({ sale, company, client, showPrint = true }) {
     })
   }
 
-  const handlePrint = () => {
-    window.print()
-  }
 
   // Calcular totales de IVA - usando valores del servidor si están disponibles
 // Calcular totales de IVA - cálculo independiente por producto
@@ -125,15 +146,6 @@ const calculateTotals = () => {
     // El total crédito es lo que se envía como amount en el payment CREDIT
     // O se puede calcular como: saldo pendiente + interés
     const totalCredit = pendingBalance + interestAmount
-    
-    console.log("🔍 DESGLOSE DE CRÉDITO EN INVOICE:", {
-      pendingBalance: pendingBalance.toFixed(2),
-      interestAmount: interestAmount.toFixed(2),
-      interestType: sale.creditInterestType,
-      totalCredit: totalCredit.toFixed(2),
-      installments: sale.creditInstallments?.length,
-      payments: sale.payments?.map(p => ({ method: p.paymentMethod, amount: p.amount }))
-    })
 
     return {
       pendingBalance,
@@ -146,7 +158,6 @@ const calculateTotals = () => {
 
   const creditInfo = getCreditInfo()
 
-  console.log("🔍 DESGLOSE DE CRÉDITO EN INVOICE:", creditInfo)
   return (
     <div className="max-w-2xl mx-auto bg-white" id="invoice-print">
       {/* Header */}
@@ -320,7 +331,7 @@ const calculateTotals = () => {
           ))}
         </div>
       </div>
-
+ 
       {/* Footer */}
       <div className="border-t border-gray-300 pt-4 mt-4 text-center text-xs text-gray-600">
         <div>Gracias por su compra</div>
@@ -329,5 +340,6 @@ const calculateTotals = () => {
 
      
     </div>
+    
   )
 }
